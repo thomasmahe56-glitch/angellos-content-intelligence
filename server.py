@@ -63,7 +63,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-_cors_origins = ["http://localhost:8080", "http://localhost:5173"]
+_cors_origins = [
+    "http://localhost:8080",
+    "http://localhost:5173",
+    "https://angellos-content-dashboard.vercel.app",
+]
 if os.getenv("CORS_ALLOWED_ORIGINS"):
     _cors_origins += [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS").split(",")]
 
