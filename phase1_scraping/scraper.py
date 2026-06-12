@@ -42,7 +42,7 @@ async def scrape_profile(profile_url: str) -> list:
 async def download_reel(url: str) -> Optional[dict]:
     """Télécharge un Reel individuel depuis son URL directe."""
     # Extrait le compte si l'URL le contient : .../ninon.ia_officiel/reel/CODE/
-    m = re.search(r"instagram\.com/([^/?#]+)/reel/", url)
+    m = re.search(r"instagram\.com/([^/?#]+)/(?:reel|p)/", url)
     account = m.group(1) if m else None
     results = await _download_all([url], account=account)
     return results[0] if results else None
@@ -105,34 +105,40 @@ async def _download_all(urls: list, account: Optional[str] = None) -> list:
 async def _download_one(url: str, account: Optional[str] = None) -> Optional[dict]:
     shortcode = _extract_shortcode(url)
     if not shortcode:
-        log_error(f"Shortcode introuvable dans : {url}")
+        log_error(f"Unsupported Instagram URL. Expected /reel/<code>/ or /p/<code>/: {url}")
         return None
 
     log_info(f"Téléchargement de {shortcode}...")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        ctx = await browser.new_context()
-        page = await ctx.new_page()
+        browser = None
+        log_info(f"{shortcode}: launching Chromium")
+        try:
+            browser = await p.chromium.launch(headless=True)
+            ctx = await browser.new_context()
+            page = await ctx.new_page()
 
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        await _dismiss_cookie_dialog(page)
-        await asyncio.sleep(5)
+            log_info(f"{shortcode}: opening Instagram page")
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await _dismiss_cookie_dialog(page)
+            await asyncio.sleep(5)
 
-        # Extrait le src MP4 progressif directement depuis la balise <video>
-        video_url = await page.evaluate(
-            "() => { const v = document.querySelector('video'); return v ? (v.currentSrc || v.src || null) : null; }"
-        )
+            # Extrait le src MP4 progressif directement depuis la balise <video>
+            log_info(f"{shortcode}: extracting video URL")
+            video_url = await page.evaluate(
+                "() => { const v = document.querySelector('video'); return v ? (v.currentSrc || v.src || null) : null; }"
+            )
 
-        if not account:
-            account = await _extract_account(page) or shortcode
+            if not account:
+                account = await _extract_account(page) or shortcode
 
-        caption_originale = await _extract_caption(page)
-
-        await browser.close()
+            caption_originale = await _extract_caption(page)
+        finally:
+            if browser:
+                await browser.close()
 
     if not video_url:
-        log_error(f"Aucune URL vidéo trouvée dans le DOM pour {shortcode}")
+        log_error(f"No playable <video> URL found in Instagram DOM for {shortcode}")
         return None
     output_dir = Path(DOWNLOADS_DIR) / account
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -141,6 +147,7 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
     if output_path.exists():
         log_info(f"Déjà téléchargé : {output_path.name}")
     else:
+        log_info(f"{shortcode}: downloading CDN video")
         await _stream_download(video_url, output_path)
 
     return {
@@ -215,5 +222,5 @@ async def _extract_account(page: Page) -> Optional[str]:
 
 
 def _extract_shortcode(url: str) -> Optional[str]:
-    match = re.search(r"/reel/([A-Za-z0-9_-]+)", url)
+    match = re.search(r"/(?:reel|p)/([A-Za-z0-9_-]+)", url)
     return match.group(1) if match else None

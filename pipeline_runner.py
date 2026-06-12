@@ -6,6 +6,9 @@ import asyncio
 import json
 from typing import Callable
 
+from config import VIDEO_DOWNLOAD_TIMEOUT_SECONDS
+from utils.logger import log_error, log_info, log_success
+
 
 def _format_script(claude_result: dict) -> str:
     """Converts Claude JSON dict into a readable multiline string for the dashboard."""
@@ -68,12 +71,33 @@ async def run(url: str, emit: Callable):
     await progress(5)
     try:
         from phase1_scraping.scraper import download_reel
-        reel = await download_reel(url)
+        log_info(f"Video download started for {url}")
+        reel = await asyncio.wait_for(
+            download_reel(url),
+            timeout=VIDEO_DOWNLOAD_TIMEOUT_SECONDS,
+        )
         if not reel:
-            await emit({"status": "error", "error": "Impossible de télécharger ce Reel. Vérifiez que le compte est public."})
+            await emit({
+                "status": "error",
+                "error": (
+                    "Video download failed: no playable video was found. "
+                    "Check that the Instagram URL is public and contains a video."
+                ),
+            })
             return
+        log_success(f"Video download completed for {reel.get('shortcode')}")
+    except asyncio.TimeoutError:
+        msg = (
+            f"Video download timed out after {VIDEO_DOWNLOAD_TIMEOUT_SECONDS}s. "
+            "Instagram may be blocking the direct downloader, or the post may not expose a playable video."
+        )
+        log_error(msg)
+        await emit({"status": "error", "error": msg})
+        return
     except Exception as e:
-        await emit({"status": "error", "error": f"Téléchargement : {e}"})
+        msg = f"Video download failed: {e}"
+        log_error(msg)
+        await emit({"status": "error", "error": msg})
         return
 
     await step("download", "done")
