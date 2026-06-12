@@ -1,3 +1,4 @@
+import threading
 import time
 from typing import Optional
 import google.generativeai as genai
@@ -18,7 +19,9 @@ genai.configure(api_key=GEMINI_API_KEY)
 # response_mime_type="application/json" in google-generativeai==0.7.x.
 _MODEL = "gemini-2.0-flash"
 
-_MAX_UPLOAD_POLLS = 60  # 60 × 5 s = 5 min max before giving up
+_UPLOAD_TIMEOUT_SECONDS = 180   # 3 min hard limit on the upload HTTP call
+_GENERATION_TIMEOUT_SECONDS = 120  # 2 min hard limit on generate_content
+_MAX_UPLOAD_POLLS = 60          # 60 × 5 s = 5 min max waiting for PROCESSING state
 
 ANALYSIS_PROMPT = """
 Analyze this Instagram Reel in detail. Reply in JSON with exactly these fields:
@@ -50,34 +53,85 @@ _CAPTION_PREFIX = """The original Instagram caption of this Reel is:
 """
 
 
+def _run_in_daemon_thread(fn, *args, timeout_s: int, label: str):
+    """
+    Run fn(*args) in a daemon thread.  Raises TimeoutError if it does not
+    complete within timeout_s seconds.  Using a daemon thread (vs an executor)
+    means a hung upload cannot prevent the process from exiting.
+    """
+    result: list = [None]
+    exc: list = [None]
+
+    def _work():
+        try:
+            result[0] = fn(*args)
+        except Exception as e:
+            exc[0] = e
+
+    t = threading.Thread(target=_work, daemon=True, name=label)
+    t.start()
+    t.join(timeout=timeout_s)
+
+    if t.is_alive():
+        # Thread is still blocking — the HTTP call never returned.
+        raise TimeoutError(
+            f"{label} did not complete within {timeout_s}s. "
+            "Railway may be unable to reach the Gemini API endpoint, "
+            "or the file is too large for the configured time limit."
+        )
+    if exc[0] is not None:
+        raise exc[0]
+    return result[0]
+
+
 def upload_video(local_path: str) -> genai.types.File:
     path = Path(local_path)
+
     if not path.exists():
         raise FileNotFoundError(f"Video file not found: {local_path}")
 
     size_mb = path.stat().st_size / (1024 * 1024)
-    log_info(f"Uploading to Gemini Files API: {path.name} ({size_mb:.1f} MB)")
+    mime_type = "video/mp4"
 
-    video_file = genai.upload_file(path=str(path), mime_type="video/mp4")
+    log_info(
+        f"[Gemini upload] START — file={path.name} "
+        f"size={size_mb:.2f} MB mime={mime_type} "
+        f"timeout={_UPLOAD_TIMEOUT_SECONDS}s"
+    )
+
+    video_file = _run_in_daemon_thread(
+        genai.upload_file,
+        path=str(path),
+        mime_type=mime_type,
+        timeout_s=_UPLOAD_TIMEOUT_SECONDS,
+        label="gemini.upload_file",
+    )
+
+    log_success(
+        f"[Gemini upload] DONE — remote_name={video_file.name} "
+        f"state={video_file.state.name}"
+    )
 
     polls = 0
     while video_file.state.name == "PROCESSING":
         polls += 1
         if polls > _MAX_UPLOAD_POLLS:
             raise TimeoutError(
-                f"Gemini file processing timed out after {_MAX_UPLOAD_POLLS * 5}s "
-                f"for {path.name}"
+                f"[Gemini upload] PROCESSING state did not resolve after "
+                f"{_MAX_UPLOAD_POLLS * 5}s for {path.name}"
             )
+        log_info(f"[Gemini upload] still PROCESSING… (poll {polls}/{_MAX_UPLOAD_POLLS})")
         time.sleep(5)
         video_file = genai.get_file(video_file.name)
 
     if video_file.state.name == "FAILED":
         raise RuntimeError(
-            f"Gemini file processing FAILED for {path.name}. "
-            "Check that the file is a valid MP4 and under the size limit."
+            f"[Gemini upload] File processing FAILED for {path.name} "
+            f"({size_mb:.2f} MB). "
+            "Verify the file is a valid MP4 and within the Gemini size limit."
         )
 
-    log_success(f"File ready: {video_file.name}")
+    log_success(f"[Gemini upload] File ACTIVE and ready: {video_file.name}")
     return video_file
 
 
@@ -93,13 +147,25 @@ def analyze_reel(local_path: str, caption_originale: Optional[str] = None) -> di
             prompt = _CAPTION_PREFIX.format(caption=caption_originale) + ANALYSIS_PROMPT
 
         model = genai.GenerativeModel(_MODEL)
-        log_info(f"Sending to Gemini ({_MODEL})…")
-        response = model.generate_content(
-            [video_file, prompt],
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.2,
-                response_mime_type="application/json",
-            ),
+        log_info(
+            f"[Gemini generate] Sending to {_MODEL} — "
+            f"timeout={_GENERATION_TIMEOUT_SECONDS}s"
+        )
+
+        def _generate():
+            return model.generate_content(
+                [video_file, prompt],
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.2,
+                    response_mime_type="application/json",
+                ),
+                request_options={"timeout": _GENERATION_TIMEOUT_SECONDS},
+            )
+
+        response = _run_in_daemon_thread(
+            _generate,
+            timeout_s=_GENERATION_TIMEOUT_SECONDS + 10,  # daemon thread slightly longer
+            label="gemini.generate_content",
         )
 
         # response.text raises ValueError when candidates are blocked or empty
@@ -112,28 +178,29 @@ def analyze_reel(local_path: str, caption_originale: Optional[str] = None) -> di
             except Exception:
                 pass
             raise RuntimeError(
-                f"Gemini returned no usable content "
+                f"[Gemini generate] No usable content returned "
                 f"(finish_reason={finish_reason}). "
-                "The video may have triggered a safety filter or the model "
-                "returned an empty response."
+                "The video may have triggered a safety filter."
             ) from exc
 
+        log_success(f"[Gemini generate] Response received — parsing JSON")
         raw = raw.strip().removeprefix("```json").removesuffix("```").strip()
 
         try:
             analysis = json.loads(raw)
         except json.JSONDecodeError:
-            log_error("Invalid JSON from Gemini — storing raw response")
+            log_error(f"[Gemini generate] Invalid JSON — storing raw response (first 200 chars): {raw[:200]}")
             analysis = {"raw_response": raw}
 
         if caption_originale:
             analysis["caption_originale"] = caption_originale
 
-        log_success(f"Gemini analysis complete for {Path(local_path).name}")
+        log_success(f"[Gemini] Analysis complete for {Path(local_path).name}")
         return analysis
 
     finally:
         try:
             genai.delete_file(video_file.name)
+            log_info(f"[Gemini] Remote file deleted: {video_file.name}")
         except Exception:
             pass
