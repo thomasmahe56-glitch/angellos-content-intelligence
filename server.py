@@ -18,6 +18,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
+APP_VERSION = "gemini-upload-timeout-v2"
+
 DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), "dashboard")
 
 jobs: dict[str, asyncio.Queue] = {}
@@ -53,6 +55,7 @@ def _stop_vite():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    print(f"[STARTUP] APP_VERSION={APP_VERSION}", flush=True)
     if not os.getenv("RAILWAY_ENVIRONMENT"):
         _start_vite()
     yield
@@ -77,6 +80,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/health")
+async def health():
+    return JSONResponse({"status": "ok", "version": APP_VERSION})
 
 
 @app.post("/analyze")
