@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TTR Pipeline — Analyse Reels</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0d0d0d;
+    color: #e2e2e2;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    padding: 2rem 1rem;
+  }
+
+  .container { max-width: 760px; margin: 0 auto; }
+
+  header { margin-bottom: 2.5rem; }
+  header h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.02em;
+  }
+  header p { color: #666; font-size: 0.9rem; margin-top: 0.3rem; }
+
+  /* ── Input card ── */
+  .card {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .input-row { display: flex; gap: 0.75rem; }
+  input[type="text"] {
+    flex: 1;
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    color: #e2e2e2;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input[type="text"]:focus { border-color: #7c3aed; }
+  input[type="text"]::placeholder { color: #444; }
+
+  button#analyzeBtn {
+    background: #7c3aed;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s, opacity 0.2s;
+  }
+  button#analyzeBtn:hover:not(:disabled) { background: #6d28d9; }
+  button#analyzeBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* ── Phases ── */
+  .phases { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem; }
+
+  .phase {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 10px;
+    transition: border-color 0.3s;
+  }
+  .phase.running { border-color: #7c3aed; }
+  .phase.done    { border-color: #16a34a; }
+  .phase.error   { border-color: #dc2626; }
+
+  .phase-icon {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: #222;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .phase.running .phase-icon { background: #4c1d95; }
+  .phase.done    .phase-icon { background: #14532d; }
+  .phase.error   .phase-icon { background: #7f1d1d; }
+
+  .phase-info { flex: 1; }
+  .phase-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #555;
+    margin-bottom: 0.2rem;
+  }
+  .phase-msg { font-size: 0.92rem; color: #ccc; }
+  .phase.running .phase-msg { color: #c4b5fd; }
+  .phase.done    .phase-msg { color: #86efac; }
+  .phase.error   .phase-msg { color: #fca5a5; }
+
+  /* spinner */
+  .spinner {
+    width: 18px; height: 18px;
+    border: 2px solid #4c1d95;
+    border-top-color: #a78bfa;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* progress bar */
+  .progress-wrap {
+    height: 3px;
+    background: #222;
+    border-radius: 2px;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+    display: none;
+  }
+  .progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #7c3aed, #a78bfa);
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+
+  /* ── Result ── */
+  #result { display: none; }
+
+  .result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .result-header h2 { font-size: 1.1rem; color: #fff; }
+
+  a.notion-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: #1e1e2e;
+    border: 1px solid #3730a3;
+    color: #818cf8;
+    border-radius: 8px;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.85rem;
+    text-decoration: none;
+    font-weight: 500;
+    transition: background 0.2s;
+  }
+  a.notion-link:hover { background: #2e2e4e; }
+
+  .script-block { margin-bottom: 1.25rem; }
+  .script-block label {
+    display: block;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #555;
+    margin-bottom: 0.5rem;
+  }
+  .hook-box {
+    background: #1a1a2e;
+    border: 1px solid #3730a3;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    font-size: 1rem;
+    color: #c7d2fe;
+    font-style: italic;
+    line-height: 1.5;
+  }
+  .steps { display: flex; flex-direction: column; gap: 0.6rem; }
+  .step {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font-size: 0.88rem;
+    color: #ccc;
+    line-height: 1.55;
+  }
+  .step-num {
+    display: inline-block;
+    background: #2a2a3a;
+    color: #818cf8;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .cta-box {
+    background: #1a2e1a;
+    border: 1px solid #166534;
+    border-radius: 8px;
+    padding: 0.9rem 1.25rem;
+    font-size: 0.9rem;
+    color: #86efac;
+    line-height: 1.5;
+  }
+
+  .meta-row {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+  }
+  .tag {
+    background: #222;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    color: #888;
+  }
+  .tag span { color: #bbb; }
+
+  .hashtags {
+    display: flex; flex-wrap: wrap; gap: 0.4rem;
+  }
+  .hashtag {
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 20px;
+    padding: 0.25rem 0.65rem;
+    font-size: 0.78rem;
+    color: #818cf8;
+  }
+
+  .why-box {
+    background: #1a1a1a;
+    border-left: 3px solid #7c3aed;
+    border-radius: 0 8px 8px 0;
+    padding: 0.85rem 1rem;
+    font-size: 0.85rem;
+    color: #999;
+    line-height: 1.6;
+    margin-top: 1rem;
+  }
+
+  .concepts { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .concept {
+    background: #1e1520;
+    border: 1px solid #4c1d95;
+    border-radius: 6px;
+    padding: 0.25rem 0.65rem;
+    font-size: 0.78rem;
+    color: #c4b5fd;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>TTR Pipeline</h1>
+    <p>Analyse un Reel Instagram et génère un script adapté TrainToRehab</p>
+  </header>
+
+  <!-- Input -->
+  <div class="card">
+    <div class="input-row">
+      <input type="text" id="urlInput"
+             placeholder="https://www.instagram.com/reel/…" />
+      <button id="analyzeBtn" onclick="startAnalysis()">Analyser</button>
+    </div>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar" id="progressBar"></div>
+  </div>
+
+  <!-- Phases -->
+  <div class="phases" id="phases">
+    <div class="phase" id="phase1">
+      <div class="phase-icon">📥</div>
+      <div class="phase-info">
+        <div class="phase-label">Phase 1</div>
+        <div class="phase-msg" id="msg1">En attente…</div>
+      </div>
+    </div>
+    <div class="phase" id="phase2">
+      <div class="phase-icon">🤖</div>
+      <div class="phase-info">
+        <div class="phase-label">Phase 2</div>
+        <div class="phase-msg" id="msg2">En attente…</div>
+      </div>
+    </div>
+    <div class="phase" id="phase3">
+      <div class="phase-icon">📝</div>
+      <div class="phase-info">
+        <div class="phase-label">Phase 3</div>
+        <div class="phase-msg" id="msg3">En attente…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Result -->
+  <div id="result">
+    <div class="result-header">
+      <h2 id="resultTitle">Script TTR généré</h2>
+      <a class="notion-link" id="notionLink" href="#" target="_blank">
+        &#x2197; Ouvrir dans Notion
+      </a>
+    </div>
+
+    <div class="meta-row" id="metaRow"></div>
+
+    <div class="script-block">
+      <label>Hook (0–3s)</label>
+      <div class="hook-box" id="hookBox"></div>
+    </div>
+
+    <div class="script-block">
+      <label>Développement</label>
+      <div class="steps" id="stepsBox"></div>
+    </div>
+
+    <div class="script-block">
+      <label>Call to action</label>
+      <div class="cta-box" id="ctaBox"></div>
+    </div>
+
+    <div class="script-block" id="conceptsSection">
+      <label>Concepts formation utilisés</label>
+      <div class="concepts" id="conceptsBox"></div>
+    </div>
+
+    <div class="script-block">
+      <label>Hashtags</label>
+      <div class="hashtags" id="hashtagsBox"></div>
+    </div>
+
+    <div class="why-box" id="whyBox"></div>
+  </div>
+
+</div>
+
+<script>
+let evtSource = null;
+
+function startAnalysis() {
+  const url = document.getElementById('urlInput').value.trim();
+  if (!url) return;
+
+  resetUI();
+  document.getElementById('analyzeBtn').disabled = true;
+  document.getElementById('progressWrap').style.display = 'block';
+
+  fetch('/analyze', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url})
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) { showError(data.error); return; }
+    listenStream(data.job_id);
+  })
+  .catch(e => showError(e.toString()));
+}
+
+function listenStream(jobId) {
+  evtSource = new EventSource(`/stream/${jobId}`);
+  evtSource.onmessage = e => handleEvent(JSON.parse(e.data));
+  evtSource.onerror   = () => { evtSource.close(); showError('Connexion SSE perdue.'); };
+}
+
+function handleEvent(ev) {
+  if (ev.type === 'phase') {
+    const el  = document.getElementById(`phase${ev.phase}`);
+    const msg = document.getElementById(`msg${ev.phase}`);
+    el.className = `phase ${ev.status}`;
+    msg.textContent = ev.message;
+
+    // Spinner
+    const existing = el.querySelector('.spinner');
+    if (existing) existing.remove();
+    if (ev.status === 'running') {
+      const s = document.createElement('div');
+      s.className = 'spinner';
+      el.appendChild(s);
+    }
+
+    // Progress bar (phases 1→33%, 2→66%, 3→100%)
+    const pct = ev.status === 'done'
+      ? ev.phase * 33.3
+      : (ev.phase - 1) * 33.3 + 10;
+    document.getElementById('progressBar').style.width = Math.min(pct, 99) + '%';
+  }
+
+  if (ev.type === 'error') {
+    showError(ev.message);
+  }
+
+  if (ev.type === 'complete') {
+    evtSource.close();
+    document.getElementById('progressBar').style.width = '100%';
+    document.getElementById('analyzeBtn').disabled = false;
+    renderResult(ev);
+  }
+}
+
+function renderResult(ev) {
+  const s = ev.script;
+  const sc = s.script || {};
+
+  document.getElementById('resultTitle').textContent =
+    s.titre_interne || 'Script TTR généré';
+
+  document.getElementById('notionLink').href = ev.notion_url || '#';
+
+  // Meta tags
+  const ind = s.indications_tournage || {};
+  const meta = [
+    {k:'Compte', v: `@${ev.account}`},
+    {k:'Format', v: ind.format_camera || ev.gemini?.format || '—'},
+    {k:'Durée',  v: (ind.durée_cible || ev.gemini?.duree || '—') + 's'},
+    {k:'Rythme', v: ind.rythme || '—'},
+  ];
+  document.getElementById('metaRow').innerHTML =
+    meta.map(m => `<div class="tag">${m.k} <span>${m.v}</span></div>`).join('');
+
+  // Script
+  document.getElementById('hookBox').textContent  = sc.hook || '';
+  document.getElementById('ctaBox').textContent   = sc.cta  || '';
+
+  const steps = sc.developpement || [];
+  document.getElementById('stepsBox').innerHTML = steps
+    .map((s, i) => `<div class="step"><span class="step-num">${i+1}</span>${s}</div>`)
+    .join('');
+
+  // Concepts formation
+  const concepts = s.concepts_formation_utilises || [];
+  if (concepts.length) {
+    document.getElementById('conceptsBox').innerHTML =
+      concepts.map(c => `<span class="concept">${c}</span>`).join('');
+    document.getElementById('conceptsSection').style.display = 'block';
+  } else {
+    document.getElementById('conceptsSection').style.display = 'none';
+  }
+
+  // Hashtags
+  const tags = s.hashtags_suggeres || [];
+  document.getElementById('hashtagsBox').innerHTML =
+    tags.map(t => `<span class="hashtag">${t}</span>`).join('');
+
+  document.getElementById('whyBox').textContent = s.pourquoi_ca_marche || '';
+
+  document.getElementById('result').style.display = 'block';
+  document.getElementById('result').scrollIntoView({behavior: 'smooth'});
+}
+
+function showError(msg) {
+  document.getElementById('analyzeBtn').disabled = false;
+  // Mark all running phases as error
+  [1,2,3].forEach(n => {
+    const el = document.getElementById(`phase${n}`);
+    if (el.classList.contains('running')) {
+      el.className = 'phase error';
+      document.getElementById(`msg${n}`).textContent = msg;
+      const s = el.querySelector('.spinner');
+      if (s) s.remove();
+    }
+  });
+}
+
+function resetUI() {
+  [1,2,3].forEach(n => {
+    document.getElementById(`phase${n}`).className = 'phase';
+    document.getElementById(`msg${n}`).textContent = 'En attente…';
+    const s = document.getElementById(`phase${n}`).querySelector('.spinner');
+    if (s) s.remove();
+  });
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('progressBar').style.width = '0%';
+  if (evtSource) { evtSource.close(); evtSource = null; }
+}
+
+// Lancer avec Entrée
+document.getElementById('urlInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startAnalysis();
+});
+</script>
+</body>
+</html>
