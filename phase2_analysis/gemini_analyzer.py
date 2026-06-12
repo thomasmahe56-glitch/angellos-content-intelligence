@@ -8,27 +8,27 @@ from utils.logger import log_info, log_success, log_error
 genai.configure(api_key=GEMINI_API_KEY)
 
 ANALYSIS_PROMPT = """
-Analyse ce Reel Instagram en détail. Réponds en JSON avec exactement ces champs :
+Analyze this Instagram Reel in detail. Reply in JSON with exactly these fields:
 
 {
-  "hook": "texte exact des 3 premières secondes ou description visuelle de l'accroche",
-  "hook_type": "question / affirmation choc / statistique / mise en situation / autre",
-  "structure_narrative": "description étape par étape de la structure (ex: problème → agitation → solution → preuve → CTA)",
-  "format": "talking head / voix-off + texte / tutoriel / avant-après / témoignage / autre",
-  "duree_estimee": "durée en secondes",
-  "cta": "call-to-action exact ou description si implicite",
-  "elements_visuels_cles": ["liste des éléments visuels marquants"],
-  "rythme": "rapide / moyen / lent",
+  "hook": "exact text of the first 3 seconds or visual description of the hook",
+  "hook_type": "question / shock statement / statistic / scenario / other",
+  "structure_narrative": "step-by-step description of the structure (e.g. problem → agitation → solution → proof → CTA)",
+  "format": "talking head / voiceover + text / tutorial / before-after / testimonial / other",
+  "duree_estimee": "duration in seconds",
+  "cta": "exact call-to-action or description if implicit",
+  "elements_visuels_cles": ["list of notable visual elements"],
+  "rythme": "fast / medium / slow",
   "sous_titres": true/false,
-  "musique": "description ou 'aucune'",
-  "points_forts": ["liste des 3 points forts qui rendent ce Reel performant"],
-  "pattern_replicable": "description du pattern principal à répliquer"
+  "musique": "description or 'none'",
+  "points_forts": ["list of the 3 strengths that make this Reel perform well"],
+  "pattern_replicable": "description of the main pattern to replicate"
 }
 
-Sois précis et factuel. Ne commente pas, retourne uniquement le JSON valide.
+Be precise and factual. Do not comment, return only valid JSON.
 """
 
-_CAPTION_PREFIX = """La caption Instagram originale de ce Reel est :
+_CAPTION_PREFIX = """The original Instagram caption of this Reel is:
 
 {caption}
 
