@@ -112,22 +112,40 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
 
     async with async_playwright() as p:
         browser = None
+        captured_video_urls: list[str] = []
         log_info(f"{shortcode}: launching Chromium")
         try:
             browser = await p.chromium.launch(headless=True)
             ctx = await browser.new_context()
             page = await ctx.new_page()
 
+            def capture_video_response(response):
+                response_url = response.url
+                content_type = response.headers.get("content-type", "")
+                if response_url.startswith(("http://", "https://")) and (
+                    "video" in content_type or ".mp4" in response_url
+                ):
+                    captured_video_urls.append(response_url)
+
+            page.on("response", capture_video_response)
+
             log_info(f"{shortcode}: opening Instagram page")
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await _dismiss_cookie_dialog(page)
-            await asyncio.sleep(5)
+            await asyncio.sleep(2)
 
             # Extrait le src MP4 progressif directement depuis la balise <video>
             log_info(f"{shortcode}: extracting video URL")
-            video_url = await page.evaluate(
-                "() => { const v = document.querySelector('video'); return v ? (v.currentSrc || v.src || null) : null; }"
-            )
+            video_url = await _extract_http_video_url(page)
+            if not video_url:
+                try:
+                    await page.locator("video").first.evaluate("video => video.play().catch(() => {})", timeout=5000)
+                    await asyncio.sleep(3)
+                    video_url = await _extract_http_video_url(page)
+                except Exception:
+                    pass
+            if not video_url and captured_video_urls:
+                video_url = captured_video_urls[0]
 
             if not account:
                 account = await _extract_account(page) or shortcode
@@ -138,7 +156,7 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
                 await browser.close()
 
     if not video_url:
-        log_error(f"No playable <video> URL found in Instagram DOM for {shortcode}")
+        log_error(f"No playable HTTP video URL found for {shortcode}")
         return None
     output_dir = Path(DOWNLOADS_DIR) / account
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -161,6 +179,8 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
 
 async def _stream_download(video_url: str, dest: Path):
     """Télécharge le flux vidéo CDN vers un fichier local."""
+    if not video_url.startswith(("http://", "https://")):
+        raise ValueError(f"Invalid video URL extracted from Instagram: {video_url[:40]}")
     async with httpx.AsyncClient(follow_redirects=True, timeout=120) as client:
         async with client.stream("GET", video_url) as r:
             r.raise_for_status()
@@ -182,6 +202,25 @@ async def _dismiss_cookie_dialog(page: Page):
         await asyncio.sleep(1)
     except Exception:
         pass  # dialog absente ou déjà fermée
+
+
+async def _extract_http_video_url(page: Page) -> Optional[str]:
+    """Return the first HTTP(S) video source exposed by the page DOM."""
+    return await page.evaluate("""
+    () => {
+        const videos = [...document.querySelectorAll('video')];
+        for (const video of videos) {
+            const candidates = [
+                video.currentSrc,
+                video.src,
+                ...[...video.querySelectorAll('source')].map(source => source.src),
+            ].filter(Boolean);
+            const src = candidates.find(value => /^https?:\\/\\//.test(value));
+            if (src) return src;
+        }
+        return null;
+    }
+    """)
 
 
 async def _extract_caption(page: Page) -> Optional[str]:
