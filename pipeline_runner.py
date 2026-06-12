@@ -6,7 +6,7 @@ import asyncio
 import json
 from typing import Callable
 
-from config import VIDEO_DOWNLOAD_TIMEOUT_SECONDS
+from config import VIDEO_DOWNLOAD_TIMEOUT_SECONDS, GEMINI_ANALYSIS_TIMEOUT_SECONDS
 from utils.logger import log_error, log_info, log_success
 
 
@@ -109,9 +109,21 @@ async def run(url: str, emit: Callable):
     try:
         from phase2_analysis.gemini_analyzer import analyze_reel
         caption_originale = reel.get("caption_originale")
-        gemini = await loop.run_in_executor(None, analyze_reel, reel["local_path"], caption_originale)
+        gemini = await asyncio.wait_for(
+            loop.run_in_executor(None, analyze_reel, reel["local_path"], caption_originale),
+            timeout=GEMINI_ANALYSIS_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        msg = (
+            f"Gemini analysis timed out after {GEMINI_ANALYSIS_TIMEOUT_SECONDS}s. "
+            "The video may be too large or the Gemini Files API is slow to process it."
+        )
+        log_error(msg)
+        await emit({"status": "error", "error": msg})
+        return
     except Exception as e:
-        await emit({"status": "error", "error": f"Gemini : {e}"})
+        log_error(f"Gemini analysis failed: {e}")
+        await emit({"status": "error", "error": f"Gemini analysis failed: {e}"})
         return
 
     await progress(55)

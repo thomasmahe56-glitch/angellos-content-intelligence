@@ -16,6 +16,7 @@ NOTION_ANGELLOS_RESULTS_DB = os.getenv("NOTION_ANGELLOS_RESULTS_DB", "")
 DOWNLOADS_DIR = os.getenv("DOWNLOADS_DIR", "./downloads")
 MAX_REELS_PER_ACCOUNT = int(os.getenv("MAX_REELS_PER_ACCOUNT", 10))
 VIDEO_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("VIDEO_DOWNLOAD_TIMEOUT_SECONDS", 90))
+GEMINI_ANALYSIS_TIMEOUT_SECONDS = int(os.getenv("GEMINI_ANALYSIS_TIMEOUT_SECONDS", 420))
 
 ANGELLOS_NICHE_CONTEXT = """
 You are a content expert for Angellos — an AI setting agent that automates prospect qualification in Instagram and WhatsApp DMs.
