@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 import {
   Download, Brain, Database, Check, Loader2, ExternalLink,
   RotateCcw, Sparkles, Users, Eye, Calendar, MessageCircle, Heart,
@@ -139,6 +139,8 @@ function Index() {
     ref.current?.close();
     const es = new EventSource(`${API_URL}/status/${id}`);
     ref.current = es;
+    // Guard against onerror firing after a successful done (server closes the stream).
+    let completed = false;
 
     es.onmessage = (event) => {
       try {
@@ -146,12 +148,14 @@ function Index() {
         if (typeof data.progress === "number") setProgress(data.progress);
         if (data.step && data.step_status) updateStep(data.step, data.step_status);
         if (data.status === "done" && data.result) {
+          completed = true;
           setSteps((prev) => prev.map((s) => ({ ...s, status: "done" })));
           setProgress(100);
           es.close();
           onDone(data.result as Result);
         }
         if (data.status === "error") {
+          completed = true;
           toast.error(data.error || "An error occurred during analysis");
           es.close();
           onError();
@@ -160,7 +164,8 @@ function Index() {
     };
 
     es.onerror = () => {
-      toast.error("Lost connection to the API");
+      if (completed) return; // stream closed normally after done — not a real error
+      toast.error("Lost connection to the API. The analysis may still be running — refresh to check.");
       es.close();
       onError();
     };
