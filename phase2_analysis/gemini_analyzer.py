@@ -1,17 +1,19 @@
 """
 Gemini video analysis with model fallback chain.
 
-Upload strategy:
-  - Video is uploaded once to the Files API (model-agnostic).
-  - Generation is attempted with each model in sequence.
-  - 429 / ResourceExhausted with limit=0 means the model is unavailable for
-    this API key — fall through to the next model.
-  - File is always deleted in the finally block.
+Upload: video uploaded once (Files API is model-agnostic).
+Generation: each model in the chain is tried; quota/not-found/param errors fall through.
 
-Model chain (configurable via env):
-  GEMINI_MODEL_PRIMARY  (default: gemini-2.0-flash)
-  GEMINI_MODEL_FALLBACKS (default: gemini-1.5-flash,gemini-1.5-pro,gemini-2.0-flash-lite)
+Available models for this API key (verified via ListModels):
+  gemini-2.0-flash, gemini-2.0-flash-lite, gemini-2.0-flash-001, gemini-2.5-flash, gemini-2.5-pro
+
+NOT available: gemini-1.5-flash, gemini-1.5-pro (404 for this key).
+
+gemini-2.5-* models have thinking enabled by default in SDK 0.7.x, which is
+incompatible with response_mime_type="application/json". Those models run without
+JSON mode and rely on prompt-based JSON instruction + text parsing.
 """
+import json
 import threading
 import time
 from typing import Optional
@@ -21,6 +23,7 @@ from config import (
     GEMINI_API_KEY,
     GEMINI_MODEL_PRIMARY,
     GEMINI_MODEL_FALLBACKS,
+    GEMINI_THINKING_MODELS,
 )
 from utils.logger import log_info, log_success, log_error
 
@@ -90,14 +93,21 @@ def _run_in_daemon_thread(fn, *args, timeout_s: int, label: str):
     return result[0]
 
 
-def _is_quota_error(exc: Exception) -> bool:
-    """Return True if this is a 429 quota-exhausted error (model unavailable for key)."""
+def _should_try_next_model(exc: Exception) -> bool:
+    """
+    Return True if this error means the model is unavailable/quota-blocked
+    and we should try the next model in the chain.
+    """
     msg = str(exc).lower()
     return (
         "429" in msg
         or "resource exhausted" in msg
         or "quota" in msg
         or "rate limit" in msg
+        or "404" in msg
+        or "not found" in msg
+        # thinking-mode incompatibility with JSON mode (SDK 0.7.x + gemini-2.5)
+        or ("400" in msg and ("thinking" in msg or "incompatible" in msg))
     )
 
 
@@ -151,31 +161,36 @@ def upload_video(local_path: str) -> genai.types.File:
 
 def _generate_with_model(model_name: str, video_file, prompt: str) -> dict:
     """
-    Attempt generation with a specific model.
-    Raises the original exception on failure (caller decides whether to fall through).
+    Attempt generation with one specific model.
+    - 2.0-generation models: use response_mime_type=application/json (structured output).
+    - 2.5-generation models: omit JSON mode (thinking incompatible), rely on prompt + parsing.
+    Raises original exception; caller decides whether to fall through.
     """
-    import json
+    use_json_mode = model_name not in GEMINI_THINKING_MODELS
 
-    model = genai.GenerativeModel(model_name)
     log_info(
         f"[Gemini generate] Trying model={model_name} "
+        f"json_mode={use_json_mode} "
         f"timeout={_GENERATION_TIMEOUT_SECONDS}s"
     )
+
+    model = genai.GenerativeModel(model_name)
+
+    gen_cfg_kwargs = {"temperature": 0.2}
+    if use_json_mode:
+        gen_cfg_kwargs["response_mime_type"] = "application/json"
 
     def _generate():
         return model.generate_content(
             [video_file, prompt],
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.2,
-                response_mime_type="application/json",
-            ),
+            generation_config=genai.types.GenerationConfig(**gen_cfg_kwargs),
             request_options={"timeout": _GENERATION_TIMEOUT_SECONDS},
         )
 
     response = _run_in_daemon_thread(
         _generate,
         timeout_s=_GENERATION_TIMEOUT_SECONDS + 10,
-        label=f"gemini.generate_content.{model_name}",
+        label=f"gemini.generate.{model_name}",
     )
 
     try:
@@ -187,19 +202,19 @@ def _generate_with_model(model_name: str, video_file, prompt: str) -> dict:
         except Exception:
             pass
         raise RuntimeError(
-            f"[Gemini generate] No usable content (model={model_name} "
+            f"[Gemini] No usable content (model={model_name} "
             f"finish_reason={finish_reason}). "
             "The video may have triggered a safety filter."
         ) from exc
 
-    log_success(f"[Gemini generate] Response received from {model_name} — parsing JSON")
+    log_success(f"[Gemini] Response received from {model_name} — parsing JSON")
     raw = raw.strip().removeprefix("```json").removesuffix("```").strip()
 
     try:
         analysis = json.loads(raw)
     except json.JSONDecodeError:
         log_error(
-            f"[Gemini generate] Invalid JSON from {model_name} "
+            f"[Gemini] Invalid JSON from {model_name} "
             f"(first 200 chars): {raw[:200]}"
         )
         analysis = {"raw_response": raw}
@@ -216,7 +231,7 @@ def analyze_reel(local_path: str, caption_originale: Optional[str] = None) -> di
     if caption_originale:
         prompt = _CAPTION_PREFIX.format(caption=caption_originale) + ANALYSIS_PROMPT
 
-    models_to_try = [GEMINI_MODEL_PRIMARY] + GEMINI_MODEL_FALLBACKS
+    models_to_try = [GEMINI_MODEL_PRIMARY] + list(GEMINI_MODEL_FALLBACKS)
     last_error: Optional[Exception] = None
 
     try:
@@ -232,22 +247,22 @@ def analyze_reel(local_path: str, caption_originale: Optional[str] = None) -> di
                 return analysis
 
             except Exception as exc:
-                if _is_quota_error(exc):
+                if _should_try_next_model(exc):
                     log_error(
-                        f"[Gemini] model={model_name} quota/rate-limit error — "
-                        f"falling through to next model. Detail: {exc}"
+                        f"[Gemini] model={model_name} unavailable/quota-blocked — "
+                        f"trying next. Detail: {exc}"
                     )
                     last_error = exc
                     continue
-                # Non-quota error: propagate immediately
-                raise
+                raise  # non-transient error: propagate immediately
 
-        # All models exhausted
         raise RuntimeError(
-            f"[Gemini] All models in the fallback chain are quota-blocked for this API key. "
+            f"[Gemini] All models in the fallback chain failed. "
             f"Models tried: {models_to_try}. "
             f"Last error: {last_error}. "
-            "Enable billing on your Google AI project or provide an API key with Gemini quota."
+            "To fix: enable billing on your Google AI project at "
+            "https://console.cloud.google.com/billing or set GEMINI_MODEL_PRIMARY "
+            "to a model with available quota."
         )
 
     finally:

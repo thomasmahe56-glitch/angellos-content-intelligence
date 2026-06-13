@@ -21,12 +21,23 @@ VIDEO_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("VIDEO_DOWNLOAD_TIMEOUT_SECONDS",
 # If the primary model returns 429 quota-limit-0 (model unavailable for this key),
 # the analyzer tries each fallback in order before giving up on Gemini entirely.
 GEMINI_MODEL_PRIMARY = os.getenv("GEMINI_MODEL_PRIMARY", "gemini-2.0-flash")
-_gemini_fallbacks_default = "gemini-1.5-flash,gemini-1.5-pro,gemini-2.0-flash-lite"
+# Fallback chain built from models actually present for this API key (verified via ListModels).
+# gemini-1.5-* are NOT available for this key (404).
+# gemini-2.5-flash works but requires JSON mode disabled (thinking incompatible with JSON mode in SDK 0.7.x).
+_gemini_fallbacks_default = "gemini-2.0-flash-lite,gemini-2.0-flash-001,gemini-2.5-flash"
 GEMINI_MODEL_FALLBACKS: list = [
     m.strip()
     for m in os.getenv("GEMINI_MODEL_FALLBACKS", _gemini_fallbacks_default).split(",")
     if m.strip()
 ]
+# Models that have thinking enabled by default in SDK 0.7.x — cannot use response_mime_type=application/json.
+GEMINI_THINKING_MODELS: set = {
+    m.strip()
+    for m in os.getenv(
+        "GEMINI_THINKING_MODELS", "gemini-2.5-flash,gemini-2.5-pro,gemini-2.5-flash-lite"
+    ).split(",")
+    if m.strip()
+}
 # Outer asyncio timeout for the entire Gemini phase (upload + processing + generation).
 # Inner daemon-thread timeouts are 180s (upload) + 120s (generation).
 # Keep this larger than their sum so the inner timeouts always fire first.
