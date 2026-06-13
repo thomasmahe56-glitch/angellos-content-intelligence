@@ -1,9 +1,8 @@
 """
-Scraper Instagram via Playwright Chromium bundled (pas le Chrome système).
-- Pas de SingletonLock : Chromium est lancé en mode non-persistant, fresh context.
-- Fonctionne sur les comptes publics sans login.
-- Listing profil  : navigue /reels/, gère la dialog cookies, collecte les hrefs.
-- Téléchargement  : navigue la page du Reel, intercepte l'URL CDN vidéo, télécharge via httpx.
+Scraper Instagram via Playwright Chromium bundled.
+Download strategy (in order):
+  1. ctx.request.get() — Playwright's own HTTP stack, reuses browser session/cookies/TLS.
+  2. yt-dlp           — handles signed CDN URLs and all Instagram quirks.
 """
 import asyncio
 import re
@@ -11,25 +10,19 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from playwright.async_api import async_playwright, Page
+from playwright.async_api import async_playwright, Page, BrowserContext
 
 from config import DOWNLOADS_DIR, MAX_REELS_PER_ACCOUNT
 from utils.logger import log_info, log_success, log_error
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# API publique
+# Public API
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def scrape_profile(profile_url: str) -> list:
-    """
-    Liste et télécharge les Reels d'un profil public Instagram.
-    profile_url : https://www.instagram.com/<compte>/reels/
-    """
-    # Extrait le compte depuis l'URL : .../ninon.ia_officiel/reels/ → ninon.ia_officiel
     m = re.search(r"instagram\.com/([^/?#]+)", profile_url)
     account = m.group(1) if m else None
-
     log_info(f"Listing Reels depuis {profile_url}")
     reel_urls = await _list_reel_urls(profile_url)
     if not reel_urls:
@@ -40,8 +33,6 @@ async def scrape_profile(profile_url: str) -> list:
 
 
 async def download_reel(url: str) -> Optional[dict]:
-    """Télécharge un Reel individuel depuis son URL directe."""
-    # Extrait le compte si l'URL le contient : .../ninon.ia_officiel/reel/CODE/
     m = re.search(r"instagram\.com/([^/?#]+)/(?:reel|p)/", url)
     account = m.group(1) if m else None
     results = await _download_all([url], account=account)
@@ -49,7 +40,7 @@ async def download_reel(url: str) -> Optional[dict]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Listing profil
+# Profile listing
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def _list_reel_urls(profile_url: str) -> list:
@@ -60,17 +51,13 @@ async def _list_reel_urls(profile_url: str) -> list:
             locale="fr-FR",
         )
         page = await ctx.new_page()
-
         await page.goto(profile_url, wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(3)          # attendre que la dialog cookies apparaisse
+        await asyncio.sleep(3)
         await _dismiss_cookie_dialog(page)
-        await asyncio.sleep(3)          # attendre le rechargement de la grille
-
-        # Scroll pour charger plus de Reels
+        await asyncio.sleep(3)
         for _ in range(4):
             await page.keyboard.press("End")
             await asyncio.sleep(2)
-
         hrefs = await page.eval_on_selector_all(
             'a[href*="/reel/"]',
             "els => [...new Set(els.map(e => e.href))]",
@@ -90,7 +77,7 @@ async def _list_reel_urls(profile_url: str) -> list:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Téléchargement
+# Download
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def _download_all(urls: list, account: Optional[str] = None) -> list:
@@ -105,121 +92,214 @@ async def _download_all(urls: list, account: Optional[str] = None) -> list:
 async def _download_one(url: str, account: Optional[str] = None) -> Optional[dict]:
     shortcode = _extract_shortcode(url)
     if not shortcode:
-        log_error(f"Unsupported Instagram URL. Expected /reel/<code>/ or /p/<code>/: {url}")
+        log_error(f"Unsupported Instagram URL (expected /reel/ or /p/): {url}")
         return None
 
     log_info(f"Téléchargement de {shortcode}...")
 
+    video_url: Optional[str] = None
+    caption_originale: Optional[str] = None
+    output_path: Optional[Path] = None
+    downloaded = False
+
     async with async_playwright() as p:
         browser = None
-        captured_video_urls: list[str] = []
-        log_info(f"{shortcode}: launching Chromium")
         try:
             browser = await p.chromium.launch(headless=True)
-            ctx = await browser.new_context()
+            ctx = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                    "Version/16.0 Mobile/15E148 Safari/604.1"
+                )
+            )
             page = await ctx.new_page()
 
-            def capture_video_response(response):
-                response_url = response.url
-                content_type = response.headers.get("content-type", "")
-                if response_url.startswith(("http://", "https://")) and (
-                    "video" in content_type or ".mp4" in response_url
-                ):
-                    captured_video_urls.append(response_url)
+            # Capture CDN video URLs from network responses as fallback
+            captured_video_urls: list[str] = []
 
-            page.on("response", capture_video_response)
+            def _on_response(response):
+                rurl = response.url
+                ct = response.headers.get("content-type", "")
+                if rurl.startswith(("http://", "https://")) and (
+                    "video" in ct or ".mp4" in rurl
+                ):
+                    captured_video_urls.append(rurl)
+
+            page.on("response", _on_response)
 
             log_info(f"{shortcode}: opening Instagram page")
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await _dismiss_cookie_dialog(page)
             await asyncio.sleep(2)
 
-            # Extrait le src MP4 progressif directement depuis la balise <video>
             log_info(f"{shortcode}: extracting video URL")
             video_url = await _extract_http_video_url(page)
             if not video_url:
                 try:
-                    await page.locator("video").first.evaluate("video => video.play().catch(() => {})", timeout=5000)
+                    await page.locator("video").first.evaluate(
+                        "video => video.play().catch(() => {})", timeout=5000
+                    )
                     await asyncio.sleep(3)
                     video_url = await _extract_http_video_url(page)
                 except Exception:
                     pass
             if not video_url and captured_video_urls:
                 video_url = captured_video_urls[0]
+                log_info(f"{shortcode}: using network-intercepted video URL")
 
             if not account:
                 account = await _extract_account(page) or shortcode
-
             caption_originale = await _extract_caption(page)
 
-            # Extract cookies before the browser closes so httpx can auth with CDN
-            raw_cookies = await ctx.cookies()
-            browser_cookies = {c["name"]: c["value"] for c in raw_cookies}
-            log_info(f"{shortcode}: extracted {len(browser_cookies)} browser cookies for CDN download")
+            # Build output path now that we have account
+            output_dir = Path(DOWNLOADS_DIR) / account
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"{shortcode}.mp4"
+
+            # Clear stale file (<10 KB means a previous bad download)
+            if output_path.exists() and output_path.stat().st_size < 10_000:
+                log_info(f"{shortcode}: removing stale file ({output_path.stat().st_size} bytes)")
+                output_path.unlink()
+
+            if output_path.exists() and output_path.stat().st_size >= 10_000:
+                log_info(
+                    f"{shortcode}: already downloaded "
+                    f"({output_path.stat().st_size // 1024} KB) — skipping"
+                )
+                downloaded = True
+            elif video_url:
+                log_info(f"{shortcode}: video_url={video_url[:120]}")
+                # Strategy 1: Playwright ctx.request (reuses browser session & TLS)
+                downloaded = await _playwright_ctx_download(
+                    ctx, video_url, output_path, shortcode
+                )
+            else:
+                log_error(f"{shortcode}: no video URL found in page or network")
+
         finally:
             if browser:
                 await browser.close()
 
-    if not video_url:
-        log_error(f"No playable HTTP video URL found for {shortcode}")
-        return None
+    # Strategy 2: yt-dlp (handles signed CDN URLs, Instagram quirks)
+    if not downloaded and output_path is not None:
+        log_info(f"{shortcode}: ctx.request failed — trying yt-dlp")
+        downloaded = await _ytdlp_download(url, output_path)
 
-    log_info(f"{shortcode}: video_url={video_url[:80]}...")
-
-    output_dir = Path(DOWNLOADS_DIR) / account
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{shortcode}.mp4"
-
-    if output_path.exists():
-        existing_size = output_path.stat().st_size
-        if existing_size > 10000:
-            log_info(f"Déjà téléchargé : {output_path.name} ({existing_size // 1024} KB)")
-        else:
-            log_info(f"Existing file too small ({existing_size} bytes) — re-downloading")
-            output_path.unlink()
-            await _stream_download(video_url, output_path, cookies=browser_cookies)
-    else:
-        log_info(f"{shortcode}: downloading CDN video")
-        await _stream_download(video_url, output_path, cookies=browser_cookies)
-
-    final_size = output_path.stat().st_size if output_path.exists() else 0
-    if final_size < 10000:
-        log_error(f"{shortcode}: downloaded file is too small ({final_size} bytes) — likely CDN auth failure")
+    if not downloaded:
+        log_error(f"{shortcode}: all download strategies failed")
         return None
 
     return {
         "url": url,
         "shortcode": shortcode,
-        "account": account,
+        "account": account or shortcode,
         "local_path": str(output_path),
         "caption_originale": caption_originale,
     }
 
 
-async def _stream_download(video_url: str, dest: Path, cookies: Optional[dict] = None):
-    """Télécharge le flux vidéo CDN vers un fichier local."""
-    if not video_url.startswith(("http://", "https://")):
-        raise ValueError(f"Invalid video URL extracted from Instagram: {video_url[:40]}")
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
-        ),
-        "Referer": "https://www.instagram.com/",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    async with httpx.AsyncClient(
-        follow_redirects=True, timeout=120, headers=headers, cookies=cookies or {}
-    ) as client:
-        async with client.stream("GET", video_url) as r:
-            r.raise_for_status()
-            written = 0
-            with open(dest, "wb") as f:
-                async for chunk in r.aiter_bytes(32768):
-                    f.write(chunk)
-                    written += len(chunk)
-    log_success(f"Téléchargé : {dest.name} ({written // 1024} KB)")
+# ──────────────────────────────────────────────────────────────────────────────
+# Download strategies
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def _playwright_ctx_download(
+    ctx: BrowserContext,
+    video_url: str,
+    dest: Path,
+    shortcode: str,
+) -> bool:
+    """
+    Download via Playwright's APIRequestContext.
+    Uses the browser's cookie jar and TLS stack — avoids CDN signed-URL rejection.
+    """
+    try:
+        resp = await ctx.request.get(
+            video_url,
+            headers={
+                "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.instagram.com/",
+            },
+            timeout=120_000,
+        )
+        status = resp.status
+        content_type = resp.headers.get("content-type", "")
+        content_length = resp.headers.get("content-length", "unknown")
+        log_info(
+            f"{shortcode}: ctx.request → "
+            f"status={status} content-type={content_type} "
+            f"content-length={content_length}"
+        )
+
+        body = await resp.body()
+        if len(body) < 10_000:
+            preview = body[:300]
+            try:
+                preview_text = preview.decode("utf-8", errors="replace")
+            except Exception:
+                preview_text = repr(preview)
+            log_error(
+                f"{shortcode}: ctx.request returned only {len(body)} bytes — "
+                f"preview: {preview_text}"
+            )
+            return False
+
+        dest.write_bytes(body)
+        log_success(
+            f"{shortcode}: ctx.request downloaded {len(body) // 1024} KB → {dest.name}"
+        )
+        return True
+
+    except Exception as exc:
+        log_error(f"{shortcode}: ctx.request.get failed: {exc}")
+        return False
+
+
+async def _ytdlp_download(url: str, dest: Path) -> bool:
+    """
+    Download via yt-dlp as final fallback.
+    Runs in a thread executor (yt-dlp is synchronous).
+    """
+    import yt_dlp  # already in requirements.txt
+
+    shortcode = dest.stem
+    log_info(f"{shortcode}: yt-dlp starting")
+
+    def _run() -> bool:
+        ydl_opts = {
+            "format": "mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "outtmpl": str(dest),
+            "merge_output_format": "mp4",
+            "quiet": False,
+            "no_warnings": False,
+            "noplaylist": True,
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+        except Exception as exc:
+            log_error(f"{shortcode}: yt-dlp exception: {exc}")
+            return False
+
+        # yt-dlp sometimes writes <name>.mp4 even when outtmpl = <name> (no ext)
+        if not dest.exists() or dest.stat().st_size < 10_000:
+            for ext in ("mp4", "webm", "mkv", "m4a"):
+                candidate = dest.with_suffix(f".{ext}")
+                if candidate.exists() and candidate != dest and candidate.stat().st_size > 10_000:
+                    candidate.rename(dest)
+                    break
+
+        size = dest.stat().st_size if dest.exists() else 0
+        if size < 10_000:
+            log_error(f"{shortcode}: yt-dlp produced only {size} bytes")
+            return False
+
+        log_success(f"{shortcode}: yt-dlp downloaded {size // 1024} KB")
+        return True
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _run)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -227,17 +307,17 @@ async def _stream_download(video_url: str, dest: Path, cookies: Optional[dict] =
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def _dismiss_cookie_dialog(page: Page):
-    """Accepte la dialog cookies Instagram si elle apparaît."""
     try:
-        btn = page.get_by_role("button", name=re.compile(r"autoriser|accept|allow", re.IGNORECASE))
+        btn = page.get_by_role(
+            "button", name=re.compile(r"autoriser|accept|allow", re.IGNORECASE)
+        )
         await btn.first.click(timeout=5000)
         await asyncio.sleep(1)
     except Exception:
-        pass  # dialog absente ou déjà fermée
+        pass
 
 
 async def _extract_http_video_url(page: Page) -> Optional[str]:
-    """Return the first HTTP(S) video source exposed by the page DOM."""
     return await page.evaluate("""
     () => {
         const videos = [...document.querySelectorAll('video')];
@@ -245,9 +325,9 @@ async def _extract_http_video_url(page: Page) -> Optional[str]:
             const candidates = [
                 video.currentSrc,
                 video.src,
-                ...[...video.querySelectorAll('source')].map(source => source.src),
+                ...[...video.querySelectorAll('source')].map(s => s.src),
             ].filter(Boolean);
-            const src = candidates.find(value => /^https?:\\/\\//.test(value));
+            const src = candidates.find(v => /^https?:\\/\\//.test(v));
             if (src) return src;
         }
         return null;
@@ -256,18 +336,15 @@ async def _extract_http_video_url(page: Page) -> Optional[str]:
 
 
 async def _extract_caption(page: Page) -> Optional[str]:
-    """Extrait la caption Instagram depuis la meta og:description."""
     try:
         text = await page.evaluate("""
         () => {
             const og = document.querySelector('meta[property="og:description"]');
             if (!og) return null;
             const content = og.getAttribute('content') || '';
-            // Instagram format: "X likes, Y comments - @account: "caption text""
             const match = content.match(/^[^:]+:\\s*(.+)$/s);
             const raw = match ? match[1] : content;
-            // Strip wrapping curly quotes if any
-            return raw.replace(/^[“«"]+|[”»"]+$/g, '').trim() || null;
+            return raw.replace(/^["«"]+|["»"]+$/g, '').trim() || null;
         }
         """)
         return text or None
@@ -276,7 +353,6 @@ async def _extract_caption(page: Page) -> Optional[str]:
 
 
 async def _extract_account(page: Page) -> Optional[str]:
-    """Extrait le @username depuis les liens de la page."""
     try:
         href = await page.eval_on_selector(
             'a[href^="/"][href$="/"]',
