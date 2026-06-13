@@ -2,7 +2,7 @@ FROM python:3.9-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV APP_VERSION=playwright-ctx-request-v4
+ENV APP_VERSION=gemini-model-fallback-v5
 
 WORKDIR /app
 

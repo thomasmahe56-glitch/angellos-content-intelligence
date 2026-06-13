@@ -16,6 +16,17 @@ NOTION_ANGELLOS_RESULTS_DB = os.getenv("NOTION_ANGELLOS_RESULTS_DB", "")
 DOWNLOADS_DIR = os.getenv("DOWNLOADS_DIR", "./downloads")
 MAX_REELS_PER_ACCOUNT = int(os.getenv("MAX_REELS_PER_ACCOUNT", 10))
 VIDEO_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("VIDEO_DOWNLOAD_TIMEOUT_SECONDS", 90))
+
+# Gemini model fallback chain.
+# If the primary model returns 429 quota-limit-0 (model unavailable for this key),
+# the analyzer tries each fallback in order before giving up on Gemini entirely.
+GEMINI_MODEL_PRIMARY = os.getenv("GEMINI_MODEL_PRIMARY", "gemini-2.0-flash")
+_gemini_fallbacks_default = "gemini-1.5-flash,gemini-1.5-pro,gemini-2.0-flash-lite"
+GEMINI_MODEL_FALLBACKS: list = [
+    m.strip()
+    for m in os.getenv("GEMINI_MODEL_FALLBACKS", _gemini_fallbacks_default).split(",")
+    if m.strip()
+]
 # Outer asyncio timeout for the entire Gemini phase (upload + processing + generation).
 # Inner daemon-thread timeouts are 180s (upload) + 120s (generation).
 # Keep this larger than their sum so the inner timeouts always fire first.
