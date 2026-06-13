@@ -20,6 +20,8 @@ VIDEO_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("VIDEO_DOWNLOAD_TIMEOUT_SECONDS",
 # Inner daemon-thread timeouts are 180s (upload) + 120s (generation).
 # Keep this larger than their sum so the inner timeouts always fire first.
 GEMINI_ANALYSIS_TIMEOUT_SECONDS = int(os.getenv("GEMINI_ANALYSIS_TIMEOUT_SECONDS", 360))
+CLAUDE_ADAPTATION_TIMEOUT_SECONDS = int(os.getenv("CLAUDE_ADAPTATION_TIMEOUT_SECONDS", 180))
+NOTION_PUSH_TIMEOUT_SECONDS = int(os.getenv("NOTION_PUSH_TIMEOUT_SECONDS", 60))
 
 ANGELLOS_NICHE_CONTEXT = """
 You are a content expert for Angellos — an AI setting agent that automates prospect qualification in Instagram and WhatsApp DMs.

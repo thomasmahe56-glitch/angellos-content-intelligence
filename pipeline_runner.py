@@ -6,7 +6,12 @@ import asyncio
 import json
 from typing import Callable
 
-from config import VIDEO_DOWNLOAD_TIMEOUT_SECONDS, GEMINI_ANALYSIS_TIMEOUT_SECONDS
+from config import (
+    VIDEO_DOWNLOAD_TIMEOUT_SECONDS,
+    GEMINI_ANALYSIS_TIMEOUT_SECONDS,
+    CLAUDE_ADAPTATION_TIMEOUT_SECONDS,
+    NOTION_PUSH_TIMEOUT_SECONDS,
+)
 from utils.logger import log_error, log_info, log_success
 
 
@@ -131,7 +136,18 @@ async def run(url: str, emit: Callable):
     # ── PHASE 2b — Claude ─────────────────────────────────────────────────────
     try:
         from phase2_analysis.claude_adapter import adapt_to_angellos
-        claude_result = await loop.run_in_executor(None, adapt_to_angellos, gemini, reel["account"])
+        claude_result = await asyncio.wait_for(
+            loop.run_in_executor(None, adapt_to_angellos, gemini, reel["account"]),
+            timeout=CLAUDE_ADAPTATION_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        msg = (
+            f"Claude adaptation timed out after {CLAUDE_ADAPTATION_TIMEOUT_SECONDS}s. "
+            "The Anthropic API may be slow or unreachable from Railway."
+        )
+        log_error(msg)
+        await emit({"status": "error", "error": msg})
+        return
     except Exception as e:
         await emit({"status": "error", "error": f"Claude : {e}"})
         return
@@ -144,7 +160,18 @@ async def run(url: str, emit: Callable):
     await progress(71)
     try:
         from phase3_notion.notion_pusher import push_to_notion
-        notion_url = await loop.run_in_executor(None, push_to_notion, reel, gemini, claude_result)
+        notion_url = await asyncio.wait_for(
+            loop.run_in_executor(None, push_to_notion, reel, gemini, claude_result),
+            timeout=NOTION_PUSH_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        msg = (
+            f"Notion push timed out after {NOTION_PUSH_TIMEOUT_SECONDS}s. "
+            "The Notion API may be slow or unreachable."
+        )
+        log_error(msg)
+        await emit({"status": "error", "error": msg})
+        return
     except Exception as e:
         await emit({"status": "error", "error": f"Notion : {e}"})
         return
