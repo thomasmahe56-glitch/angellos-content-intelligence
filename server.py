@@ -18,7 +18,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-APP_VERSION = "cdn-cookies-fix-v3"
+_APP_VERSION_DEFAULT = "cdn-cookies-fix-v3"
+# Railway env var overrides the literal — lets us verify a deploy without a code push.
+APP_VERSION = os.getenv("APP_VERSION", _APP_VERSION_DEFAULT)
+
+# Written by the Dockerfile RUN step — changes on every build, proves the image is fresh.
+_BUILD_TIME_FILE = os.path.join(os.path.dirname(__file__), ".build_time")
+BUILD_TIME = open(_BUILD_TIME_FILE).read().strip() if os.path.exists(_BUILD_TIME_FILE) else "unknown"
 
 DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), "dashboard")
 
@@ -55,7 +61,7 @@ def _stop_vite():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"[STARTUP] APP_VERSION={APP_VERSION}", flush=True)
+    print(f"[STARTUP] APP_VERSION={APP_VERSION} BUILD_TIME={BUILD_TIME}", flush=True)
     if not os.getenv("RAILWAY_ENVIRONMENT"):
         _start_vite()
     yield
@@ -84,7 +90,7 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return JSONResponse({"status": "ok", "version": APP_VERSION})
+    return JSONResponse({"status": "ok", "version": APP_VERSION, "build_time": BUILD_TIME})
 
 
 @app.post("/analyze")

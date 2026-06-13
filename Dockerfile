@@ -14,4 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # Copy application code (separate layer — reruns on every code change, fast)
 COPY . .
 
+# Stamp build time — runs after COPY so it is never served from a stale cache layer.
+# /health returns this timestamp to prove which build is live.
+RUN date -u +"%Y-%m-%dT%H:%M:%SZ" > /app/.build_time && cat /app/.build_time
+
 CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8080}"]
