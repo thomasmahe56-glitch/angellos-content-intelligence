@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-_APP_VERSION_DEFAULT = "gemini-correct-fallback-v6"
+_APP_VERSION_DEFAULT = "notion-schema-fix-v7"
 # Railway env var overrides the literal — lets us verify a deploy without a code push.
 APP_VERSION = os.getenv("APP_VERSION", _APP_VERSION_DEFAULT)
 
