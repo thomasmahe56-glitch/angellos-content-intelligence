@@ -100,9 +100,7 @@ def upload_video(local_path: str) -> genai.types.File:
     )
 
     video_file = _run_in_daemon_thread(
-        genai.upload_file,
-        path=str(path),
-        mime_type=mime_type,
+        lambda: genai.upload_file(path=str(path), mime_type=mime_type),
         timeout_s=_UPLOAD_TIMEOUT_SECONDS,
         label="gemini.upload_file",
     )
