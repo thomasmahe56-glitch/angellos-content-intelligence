@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-_APP_VERSION_DEFAULT = "serve-spa-from-railway-v8"
+_APP_VERSION_DEFAULT = "serve-spa-from-railway-v9"
 # Railway env var overrides the literal — lets us verify a deploy without a code push.
 APP_VERSION = os.getenv("APP_VERSION", _APP_VERSION_DEFAULT)
 
