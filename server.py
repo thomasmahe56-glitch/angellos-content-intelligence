@@ -16,9 +16,10 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
-_APP_VERSION_DEFAULT = "notion-schema-fix-v7"
+_APP_VERSION_DEFAULT = "serve-spa-from-railway-v8"
 # Railway env var overrides the literal — lets us verify a deploy without a code push.
 APP_VERSION = os.getenv("APP_VERSION", _APP_VERSION_DEFAULT)
 
@@ -202,6 +203,11 @@ async def _run_pipeline(url: str, emit):
         await run(url, emit)
     except Exception as e:
         await emit({"status": "error", "error": str(e)})
+
+
+_DIST_DIR = os.path.join(os.path.dirname(__file__), "dashboard", "dist")
+if os.path.isdir(_DIST_DIR):
+    app.mount("/", StaticFiles(directory=_DIST_DIR, html=True), name="spa")
 
 
 if __name__ == "__main__":

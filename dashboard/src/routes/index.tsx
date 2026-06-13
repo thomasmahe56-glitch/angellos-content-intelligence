@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL || "";
 import {
   Download, Brain, Database, Check, Loader2, ExternalLink,
   RotateCcw, Sparkles, Users, Eye, Calendar, MessageCircle, Heart,
