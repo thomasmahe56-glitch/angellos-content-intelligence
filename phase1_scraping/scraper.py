@@ -151,6 +151,11 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
                 account = await _extract_account(page) or shortcode
 
             caption_originale = await _extract_caption(page)
+
+            # Extract cookies before the browser closes so httpx can auth with CDN
+            raw_cookies = await ctx.cookies()
+            browser_cookies = {c["name"]: c["value"] for c in raw_cookies}
+            log_info(f"{shortcode}: extracted {len(browser_cookies)} browser cookies for CDN download")
         finally:
             if browser:
                 await browser.close()
@@ -158,15 +163,29 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
     if not video_url:
         log_error(f"No playable HTTP video URL found for {shortcode}")
         return None
+
+    log_info(f"{shortcode}: video_url={video_url[:80]}...")
+
     output_dir = Path(DOWNLOADS_DIR) / account
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{shortcode}.mp4"
 
     if output_path.exists():
-        log_info(f"Déjà téléchargé : {output_path.name}")
+        existing_size = output_path.stat().st_size
+        if existing_size > 10000:
+            log_info(f"Déjà téléchargé : {output_path.name} ({existing_size // 1024} KB)")
+        else:
+            log_info(f"Existing file too small ({existing_size} bytes) — re-downloading")
+            output_path.unlink()
+            await _stream_download(video_url, output_path, cookies=browser_cookies)
     else:
         log_info(f"{shortcode}: downloading CDN video")
-        await _stream_download(video_url, output_path)
+        await _stream_download(video_url, output_path, cookies=browser_cookies)
+
+    final_size = output_path.stat().st_size if output_path.exists() else 0
+    if final_size < 10000:
+        log_error(f"{shortcode}: downloaded file is too small ({final_size} bytes) — likely CDN auth failure")
+        return None
 
     return {
         "url": url,
@@ -177,17 +196,30 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
     }
 
 
-async def _stream_download(video_url: str, dest: Path):
+async def _stream_download(video_url: str, dest: Path, cookies: Optional[dict] = None):
     """Télécharge le flux vidéo CDN vers un fichier local."""
     if not video_url.startswith(("http://", "https://")):
         raise ValueError(f"Invalid video URL extracted from Instagram: {video_url[:40]}")
-    async with httpx.AsyncClient(follow_redirects=True, timeout=120) as client:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        ),
+        "Referer": "https://www.instagram.com/",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=120, headers=headers, cookies=cookies or {}
+    ) as client:
         async with client.stream("GET", video_url) as r:
             r.raise_for_status()
+            written = 0
             with open(dest, "wb") as f:
                 async for chunk in r.aiter_bytes(32768):
                     f.write(chunk)
-    log_success(f"Téléchargé : {dest.name}")
+                    written += len(chunk)
+    log_success(f"Téléchargé : {dest.name} ({written // 1024} KB)")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

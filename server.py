@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-APP_VERSION = "gemini-upload-timeout-v2"
+APP_VERSION = "cdn-cookies-fix-v3"
 
 DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), "dashboard")
 
