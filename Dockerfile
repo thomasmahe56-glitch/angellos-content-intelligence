@@ -6,7 +6,7 @@ ENV APP_VERSION=serve-spa-from-railway-v9
 
 WORKDIR /app
 
-# Install Node.js (needed to build the React dashboard)
+# Install Node.js (needed to build the React dashboard) — 2026-06-13T10:10
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
