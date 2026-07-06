@@ -5,6 +5,8 @@ Download strategy (in order):
   2. yt-dlp           — handles signed CDN URLs and all Instagram quirks.
 """
 import asyncio
+import base64
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -12,7 +14,12 @@ from typing import Optional
 import httpx
 from playwright.async_api import async_playwright, Page, BrowserContext
 
-from config import DOWNLOADS_DIR, MAX_REELS_PER_ACCOUNT
+from config import (
+    DOWNLOADS_DIR,
+    INSTAGRAM_COOKIES_B64,
+    INSTAGRAM_COOKIES_FILE,
+    MAX_REELS_PER_ACCOUNT,
+)
 from utils.logger import log_info, log_success, log_error
 
 
@@ -113,6 +120,9 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
                     "Version/16.0 Mobile/15E148 Safari/604.1"
                 )
             )
+            cookie_path = _get_instagram_cookie_file()
+            if cookie_path:
+                await _add_instagram_cookies_to_context(ctx, cookie_path)
             page = await ctx.new_page()
 
             # Capture CDN video URLs from network responses as fallback
@@ -268,14 +278,7 @@ async def _ytdlp_download(url: str, dest: Path) -> bool:
     log_info(f"{shortcode}: yt-dlp starting")
 
     def _run() -> bool:
-        ydl_opts = {
-            "format": "mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-            "outtmpl": str(dest),
-            "merge_output_format": "mp4",
-            "quiet": False,
-            "no_warnings": False,
-            "noplaylist": True,
-        }
+        ydl_opts = _build_ytdlp_opts(dest, _get_instagram_cookie_file())
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -306,6 +309,96 @@ async def _ytdlp_download(url: str, dest: Path) -> bool:
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _get_instagram_cookie_file() -> Optional[str]:
+    """
+    Decode the configured Instagram Netscape cookies file if present.
+    Never logs or returns cookie contents; only returns an existing non-empty path.
+    """
+    if INSTAGRAM_COOKIES_B64:
+        try:
+            cookie_bytes = base64.b64decode(INSTAGRAM_COOKIES_B64, validate=True)
+            cookie_path = Path(INSTAGRAM_COOKIES_FILE)
+            cookie_path.parent.mkdir(parents=True, exist_ok=True)
+            cookie_path.write_bytes(cookie_bytes)
+            try:
+                os.chmod(cookie_path, 0o600)
+            except OSError:
+                pass
+        except Exception as exc:
+            log_error(f"Instagram cookie file setup failed: {exc}")
+            return None
+
+    cookie_path = Path(INSTAGRAM_COOKIES_FILE)
+    if cookie_path.exists() and cookie_path.stat().st_size > 0:
+        return str(cookie_path)
+    return None
+
+
+def _build_ytdlp_opts(dest: Path, cookie_path: Optional[str] = None) -> dict:
+    ydl_opts = {
+        "format": "mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "outtmpl": str(dest),
+        "merge_output_format": "mp4",
+        "quiet": False,
+        "no_warnings": False,
+        "noplaylist": True,
+    }
+    if cookie_path and Path(cookie_path).exists() and Path(cookie_path).stat().st_size > 0:
+        ydl_opts["cookiefile"] = cookie_path
+        log_info("yt-dlp using Instagram cookie file")
+    return ydl_opts
+
+
+async def _add_instagram_cookies_to_context(ctx: BrowserContext, cookie_path: str) -> None:
+    try:
+        cookies = _parse_netscape_cookies(cookie_path)
+        if not cookies:
+            return
+        await ctx.add_cookies(cookies)
+        log_info("Playwright using Instagram cookie file")
+    except Exception as exc:
+        log_error(f"Playwright Instagram cookie injection skipped: {exc}")
+
+
+def _parse_netscape_cookies(cookie_path: str) -> list[dict]:
+    cookies = []
+    with open(cookie_path, "r", encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if not line or line.startswith("# Netscape"):
+                continue
+            http_only = False
+            if line.startswith("#HttpOnly_"):
+                http_only = True
+                line = line[len("#HttpOnly_"):]
+            elif line.startswith("#"):
+                continue
+
+            parts = line.split("\t")
+            if len(parts) != 7:
+                continue
+            domain, _include_subdomains, path, secure, expires, name, value = parts
+            if not name:
+                continue
+
+            cookie = {
+                "name": name,
+                "value": value,
+                "domain": domain,
+                "path": path or "/",
+                "httpOnly": http_only,
+                "secure": secure.upper() == "TRUE",
+            }
+            try:
+                expires_int = int(expires)
+                if expires_int > 0:
+                    cookie["expires"] = expires_int
+            except ValueError:
+                pass
+            cookies.append(cookie)
+    return cookies
+
 
 async def _dismiss_cookie_dialog(page: Page):
     try:
