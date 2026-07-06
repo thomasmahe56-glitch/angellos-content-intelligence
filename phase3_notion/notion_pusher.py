@@ -99,7 +99,7 @@ def push_to_notion(
             parent={"database_id": db_id},
             properties={
                 "Name": {
-                    "title": [{"text": {"content": titre[:2000]}}],
+                    "title": [{"text": {"content": titre[:1800]}}],
                 },
                 "Platform": {
                     "select": {"name": "Instagram"},
@@ -210,7 +210,7 @@ def _paragraph(text: str) -> dict:
     return {
         "object": "block",
         "type": "paragraph",
-        "paragraph": {"rich_text": [{"text": {"content": (text or "")[:2000]}}]},
+        "paragraph": {"rich_text": [{"text": {"content": (text or "")[:1800]}}]},
     }
 
 
@@ -218,7 +218,7 @@ def _bullet(text: str) -> dict:
     return {
         "object": "block",
         "type": "bulleted_list_item",
-        "bulleted_list_item": {"rich_text": [{"text": {"content": (text or "")[:2000]}}]},
+        "bulleted_list_item": {"rich_text": [{"text": {"content": (text or "")[:1800]}}]},
     }
 
 
@@ -227,14 +227,14 @@ def _callout(text: str) -> dict:
         "object": "block",
         "type": "callout",
         "callout": {
-            "rich_text": [{"text": {"content": (text or "")[:2000]}}],
+            "rich_text": [{"text": {"content": (text or "")[:1800]}}],
             "icon": {"emoji": "💡"},
         },
     }
 
 
 def _code_blocks(content: str) -> list:
-    chunks = [content[i:i+2000] for i in range(0, len(content), 2000)]
+    chunks = [content[i:i+1800] for i in range(0, len(content), 1800)]
     return [
         {
             "object": "block",
