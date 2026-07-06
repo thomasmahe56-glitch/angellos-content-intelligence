@@ -108,7 +108,7 @@ def push_to_notion(
                     "select": {"name": ig_content_type},
                 },
                 "IG Status": {
-                    "status": {"name": "Idea"},
+                    "select": {"name": "Idea"},
                 },
                 "Content Type": {
                     "select": {"name": content_type},
