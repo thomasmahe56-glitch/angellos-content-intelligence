@@ -37,7 +37,7 @@ _DEFAULT_IG_CONTENT_TYPE = "Tips"
 _DEFAULT_CONTENT_TYPE = "Hooks"
 
 
-def _map_ig_content_type(format_str: str | None, claude_suggested: str | None) -> str:
+def _map_ig_content_type(format_str: Optional[str], claude_suggested: Optional[str]) -> str:
     if claude_suggested and claude_suggested in (
         "Histoire", "Carousel", "Liste", "Tips", "Mythe",
         "Erreur commune", "Step by step", "Citation", "Humour",
@@ -51,7 +51,7 @@ def _map_ig_content_type(format_str: str | None, claude_suggested: str | None) -
     return _DEFAULT_IG_CONTENT_TYPE
 
 
-def _map_content_type(claude_suggested: str | None) -> str:
+def _map_content_type(claude_suggested: Optional[str]) -> str:
     allowed = (
         "Promotion", "Hooks", "Personnal Branding", "Preuve Social",
         "Objections", "Croyances Limitantes", "Mythes et Croyances",
