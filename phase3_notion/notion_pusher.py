@@ -1,29 +1,81 @@
 """
-Push generated Reel analysis + Angellos script to the Notion database.
+Push generated Reel analysis + Angellos script to the Programme Content Notion database.
 
-Target DB schema (Angellos — Results DB):
-  Name     — title
-  Content  — rich_text   (hook + script summary)
-  Type     — select      (uses "Content Topic Used")
-  Account  — rich_text
-  Date     — date
-  Active   — checkbox
+Target DB: "All Content" (Programme Content page)
+Schema:
+  Name             — title
+  Platform         — select    → "Instagram"
+  IG Content Type  — select    → determined by Claude
+  IG Status        — select    → "Idea"
+  Content Type     — select    → determined by Claude
+  Date of Publish  — date      → today
 
-Full script, analysis, hashtags, and caption are written as page body blocks.
+Full script, analysis, and metadata are written as page body blocks.
 """
 import json
 from datetime import date
 from typing import Optional
 from notion_client import Client
-from config import NOTION_API_KEY, NOTION_DATABASE_ID
+from config import NOTION_API_KEY, NOTION_PROGRAMME_CONTENT_DB
 from utils.logger import log_info, log_success, log_error
 
 notion = Client(auth=NOTION_API_KEY)
 
+# ── IG Content Type mapping (fallback if Claude doesn't suggest one) ──────────
 
-def push_to_notion(reel_data: dict, gemini_analysis: dict, claude_script: dict) -> Optional[str]:
-    """Creates a page in the Notion database. Returns the page URL or None on failure."""
-    log_info(f"Push Notion pour {reel_data['shortcode']}...")
+_GEMINI_FORMAT_TO_IG_TYPE = {
+    "tutorial": "Step by step",
+    "before-after": "Histoire",
+    "testimonial": "Histoire",
+    "talking head": "Tips",
+    "voiceover": "Tips",
+    "voiceover + text": "Tips",
+    "talking head + text": "Tips",
+}
+
+_DEFAULT_IG_CONTENT_TYPE = "Tips"
+_DEFAULT_CONTENT_TYPE = "Hooks"
+
+
+def _map_ig_content_type(format_str: str | None, claude_suggested: str | None) -> str:
+    if claude_suggested and claude_suggested in (
+        "Histoire", "Carousel", "Liste", "Tips", "Mythe",
+        "Erreur commune", "Step by step", "Citation", "Humour",
+        "Exercices", "offre",
+    ):
+        return claude_suggested
+    if format_str:
+        for key, val in _GEMINI_FORMAT_TO_IG_TYPE.items():
+            if key in format_str.lower():
+                return val
+    return _DEFAULT_IG_CONTENT_TYPE
+
+
+def _map_content_type(claude_suggested: str | None) -> str:
+    allowed = (
+        "Promotion", "Hooks", "Personnal Branding", "Preuve Social",
+        "Objections", "Croyances Limitantes", "Mythes et Croyances",
+        "Conseils Pratiques", "Inspiration", "Erreurs", "Présentation",
+    )
+    if claude_suggested and claude_suggested in allowed:
+        return claude_suggested
+    return _DEFAULT_CONTENT_TYPE
+
+
+def push_to_notion(
+    reel_data: dict,
+    gemini_analysis: dict,
+    claude_script: dict,
+) -> Optional[str]:
+    """Creates a page in the Programme Content Notion database.
+    Returns the page URL or None on failure.
+    """
+    db_id = NOTION_PROGRAMME_CONTENT_DB
+    if not db_id:
+        log_error("NOTION_PROGRAMME_CONTENT_DB is not set — skipping Notion push")
+        return None
+
+    log_info(f"Push Notion (Programme Content) pour {reel_data['shortcode']}...")
 
     script = claude_script.get("script", {})
     indications = claude_script.get("indications_tournage", {})
@@ -33,29 +85,36 @@ def push_to_notion(reel_data: dict, gemini_analysis: dict, claude_script: dict) 
     )
     hook = script.get("hook", gemini_analysis.get("hook", ""))
     cta = script.get("cta", gemini_analysis.get("cta", ""))
-    content_summary = f"🎣 {hook}\n\n📣 {cta}"
+
+    # Determine content types
+    gemini_format = gemini_analysis.get("format", "")
+    ig_content_type = _map_ig_content_type(
+        gemini_format,
+        claude_script.get("ig_content_type"),
+    )
+    content_type = _map_content_type(claude_script.get("content_type"))
 
     try:
         page = notion.pages.create(
-            parent={"database_id": NOTION_DATABASE_ID},
+            parent={"database_id": db_id},
             properties={
                 "Name": {
-                    "title": [{"text": {"content": titre[:2000]}}]
+                    "title": [{"text": {"content": titre[:2000]}}],
                 },
-                "Content": {
-                    "rich_text": [{"text": {"content": content_summary[:2000]}}]
+                "Platform": {
+                    "select": {"name": "Instagram"},
                 },
-                "Type": {
-                    "select": {"name": "Content Topic Used"}
+                "IG Content Type": {
+                    "select": {"name": ig_content_type},
                 },
-                "Account": {
-                    "rich_text": [{"text": {"content": f"@{reel_data.get('account', '')}"}}]
+                "IG Status": {
+                    "status": {"name": "Idea"},
                 },
-                "Date": {
-                    "date": {"start": date.today().isoformat()}
+                "Content Type": {
+                    "select": {"name": content_type},
                 },
-                "Active": {
-                    "checkbox": True
+                "Date of Publish": {
+                    "date": {"start": date.today().isoformat()},
                 },
             },
             children=_build_body(reel_data, gemini_analysis, claude_script),

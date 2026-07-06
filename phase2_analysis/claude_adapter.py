@@ -55,6 +55,8 @@ Reply with this exact JSON:
 
 {{
   "titre_interne": "short internal title to identify this script (e.g. 'DMs eating your day')",
+  "ig_content_type": "choose the best match from: Histoire, Carousel, Liste, Tips, Mythe, Erreur commune, Step by step, Citation, Humour, Exercices, offre",
+  "content_type": "choose the best match from: Promotion, Hooks, Personnal Branding, Preuve Social, Objections, Croyances Limitantes, Mythes et Croyances, Conseils Pratiques, Inspiration, Erreurs, Présentation",
   "script": {{
     "hook": "exact hook text (0-3s)",
     "developpement": [
