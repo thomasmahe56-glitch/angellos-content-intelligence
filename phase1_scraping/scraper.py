@@ -175,7 +175,8 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
                     ctx, video_url, output_path, shortcode
                 )
             else:
-                log_error(f"{shortcode}: no video URL found in page or network")
+                log_error(f"{shortcode}: no video URL found in page or network — will try yt-dlp")
+                downloaded = False
 
         finally:
             if browser:
@@ -183,7 +184,7 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
 
     # Strategy 2: yt-dlp (handles signed CDN URLs, Instagram quirks)
     if not downloaded and output_path is not None:
-        log_info(f"{shortcode}: ctx.request failed — trying yt-dlp")
+        log_info(f"{shortcode}: trying yt-dlp fallback")
         downloaded = await _ytdlp_download(url, output_path)
 
     if not downloaded:
