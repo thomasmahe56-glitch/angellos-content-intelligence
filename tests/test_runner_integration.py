@@ -107,3 +107,71 @@ def test_max_content_zero_never_downloads_or_creates(monkeypatch, tmp_path):
     assert result["relevance_qualified"] == 1
     assert result["videos_downloaded"] == 0
     assert result["content_ideas_created"] == 0
+
+
+def test_manual_analysis_gets_one_quality_correction_before_creating(monkeypatch, tmp_path):
+    """Manual endpoint must have the same bounded correction as the scout."""
+    video = tmp_path / "manual-source.mp4"
+    video.write_bytes(b"video")
+
+    class Browser:
+        async def check_authentication(self): pass
+        async def enrich(self, candidate, _):
+            candidate.creator_username = "creator"
+            candidate.views, candidate.followers = 100_000, 10_000
+            return candidate
+
+    created = []
+    class Calendar:
+        def __init__(self, *_): pass
+        def recent_content(self): return []
+        def create(self, *_args, **_kwargs):
+            created.append(True)
+            return "https://www.notion.so/idea"
+
+    class Luna:
+        def __init__(self, *_):
+            self.calls, self.input_tokens, self.output_tokens = 0, 123, 45
+        def estimated_cost_usd(self): return None
+
+    adaptation_contexts = []
+    async def adapt(client, _candidate, _gemini, context, *_args):
+        client.calls += 1
+        adaptation_contexts.append(context)
+        return {"internal_title": "Corrected unique concept"}
+
+    quality_answers = iter((
+        {"approved": False, "issues": ["angle overlaps recent content"]},
+        {"approved": True, "issues": []},
+    ))
+    async def quality(client, *_args):
+        client.calls += 1
+        return next(quality_answers)
+
+    async def download(_): return {"local_path": str(video), "caption_originale": "caption"}
+    async def gemini(*_): return {"_gemini_model_used": "fake-gemini"}
+
+    download_module = types.ModuleType("content_agent.video.downloader")
+    download_module.download = download
+    gemini_module = types.ModuleType("content_agent.video.gemini_analyzer")
+    gemini_module.analyze_video = gemini
+    gemini_module.GeminiAnalysisError = RuntimeError
+    monkeypatch.setitem(sys.modules, "content_agent.video.downloader", download_module)
+    monkeypatch.setitem(sys.modules, "content_agent.video.gemini_analyzer", gemini_module)
+    monkeypatch.setattr(runner, "InstagramBrowser", lambda _: Browser())
+    monkeypatch.setattr(runner, "NotionEditorialCalendar", Calendar)
+    monkeypatch.setattr(runner, "LunaClient", Luna)
+    monkeypatch.setattr(runner, "adapt_to_angellos", adapt)
+    monkeypatch.setattr(runner, "quality_check", quality)
+    monkeypatch.setattr(runner, "fetch_angellos_context", lambda: "canonical context")
+
+    result = asyncio.run(runner.analyze_reel_url("https://www.instagram.com/reel/abc/", cfg=Settings()))
+
+    assert result["status"] == "completed"
+    assert result["content_ideas_created"] == 1
+    assert result["ai_calls"] == {"luna": 4, "gemini": 1}
+    assert len(adaptation_contexts) == 2
+    assert "Correct these quality issues" in adaptation_contexts[1]
+    assert result["costs"]["luna_input_tokens"] == 123
+    assert created
+    assert not video.exists()

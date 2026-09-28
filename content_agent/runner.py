@@ -251,6 +251,21 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
         luna = LunaClient(cfg)
         adaptation = await adapt_to_angellos(luna, candidate, gemini, context, recent, historical, cfg.content_language)
         gate = await quality_check(luna, adaptation, context, recent)
+        if not gate["approved"]:
+            # A supplied Reel receives the same single corrective pass as the
+            # scheduled scout.  This preserves the quality gate while giving a
+            # viable source one precise chance to resolve novelty or claim
+            # issues; it is deliberately not an open-ended rewrite loop.
+            adaptation = await adapt_to_angellos(
+                luna,
+                candidate,
+                gemini,
+                context + "\nCorrect these quality issues: " + "; ".join(gate["issues"]),
+                recent,
+                historical,
+                cfg.content_language,
+            )
+            gate = await quality_check(luna, adaptation, context, recent)
         report.ai_calls["luna"] = luna.calls
         if not gate["approved"]:
             report.status, report.failed, report.errors = "partial_failure", 1, ["quality_gate_rejected: " + "; ".join(gate["issues"])]
@@ -305,11 +320,31 @@ def _set_cost_report(report: RunReport, cfg: Settings, luna, apify_cost_usd: flo
     )
     values = {"apify_usd": apify_cost_usd if apify_cost_known else None, "luna_usd": luna_cost, "gemini_usd": gemini_cost}
     total = sum(values.values()) if all(value is not None for value in values.values()) else None
-    report.costs = {**values, "total_usd": total, "currency": "USD", "complete": total is not None}
+    report.costs = {
+        **values,
+        "total_usd": total,
+        "currency": "USD",
+        "complete": total is not None,
+        # Token counts remain useful and auditable when an environment has not
+        # configured a price card for its provider/model yet.
+        "luna_input_tokens": getattr(luna, "input_tokens", 0),
+        "luna_output_tokens": getattr(luna, "output_tokens", 0),
+        "gemini_videos": report.videos_analyzed,
+    }
 
 
 def _unknown_cost_report() -> dict:
-    return {"apify_usd": 0.0, "luna_usd": None, "gemini_usd": None, "total_usd": None, "currency": "USD", "complete": False}
+    return {
+        "apify_usd": 0.0,
+        "luna_usd": None,
+        "gemini_usd": None,
+        "total_usd": None,
+        "currency": "USD",
+        "complete": False,
+        "luna_input_tokens": 0,
+        "luna_output_tokens": 0,
+        "gemini_videos": 0,
+    }
 
 
 async def sync_performance() -> dict:
