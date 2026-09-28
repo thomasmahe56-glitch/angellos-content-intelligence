@@ -32,7 +32,7 @@ GEMINI_MODEL_PRIMARY = os.getenv("GEMINI_VIDEO_MODEL", GEMINI_MODEL_PRIMARY)
 # Fallback chain built from models actually present for this API key (verified via ListModels).
 # gemini-1.5-* are NOT available for this key (404).
 # gemini-2.5-flash works but requires JSON mode disabled (thinking incompatible with JSON mode in SDK 0.7.x).
-_gemini_fallbacks_default = "gemini-2.0-flash-lite,gemini-2.0-flash-001,gemini-2.5-flash"
+_gemini_fallbacks_default = "gemini-2.0-flash-lite,gemini-2.0-flash-001,gemini-2.5-flash-lite,gemini-2.5-flash"
 GEMINI_MODEL_FALLBACKS: list = [
     m.strip()
     for m in os.getenv("GEMINI_MODEL_FALLBACKS", _gemini_fallbacks_default).split(",")

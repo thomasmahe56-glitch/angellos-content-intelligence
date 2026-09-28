@@ -325,10 +325,22 @@ async def analyze_reel_url(
             return None
         if isinstance(value, bool):
             raise ValueError(f"observed_metrics.{name} must be a non-negative integer")
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"observed_metrics.{name} must be a non-negative integer") from exc
+        if isinstance(value, str):
+            normalized = value.strip().lower().replace("\u202f", "").replace(" ", "").replace(",", ".")
+            multiplier = 1
+            if normalized.endswith("k"):
+                multiplier, normalized = 1_000, normalized[:-1]
+            elif normalized.endswith("m"):
+                multiplier, normalized = 1_000_000, normalized[:-1]
+            try:
+                parsed = int(float(normalized) * multiplier)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"observed_metrics.{name} must be a non-negative integer") from exc
+        else:
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"observed_metrics.{name} must be a non-negative integer") from exc
         if parsed < 0:
             raise ValueError(f"observed_metrics.{name} must be a non-negative integer")
         return parsed
