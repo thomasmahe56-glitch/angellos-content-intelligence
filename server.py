@@ -115,7 +115,11 @@ async def agent_analyze(request: Request):
     if not source_url:
         return JSONResponse({"error": "Instagram Reel URL is required"}, status_code=400)
     from content_agent.runner import analyze_reel_url
-    result = await analyze_reel_url(source_url, dry_run=bool(body.get("dry_run", False)))
+    result = await analyze_reel_url(
+        source_url,
+        dry_run=bool(body.get("dry_run", False)),
+        observed_metrics=body.get("observed_metrics"),
+    )
     return JSONResponse(result, status_code=200 if result.get("status") == "completed" else 207)
 
 

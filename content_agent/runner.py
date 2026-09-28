@@ -283,8 +283,20 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
     return report.finish()
 
 
-async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Settings = settings) -> dict:
-    """Analyze one supplied Instagram Reel through the same Gemini→Luna safety gates."""
+async def analyze_reel_url(
+    source_url: str,
+    *,
+    dry_run: bool = False,
+    observed_metrics: Optional[dict] = None,
+    cfg: Settings = settings,
+) -> dict:
+    """Analyze one supplied Reel through Gemini→Luna safety gates.
+
+    When ``observed_metrics`` is supplied, it is the authoritative Computer Use
+    observation.  This deliberately bypasses the legacy Playwright and Apify
+    metric paths: a scheduled Codex run has already opened Instagram and read
+    the visible counters itself.
+    """
     from content_agent.models.schemas import Candidate
     from content_agent.video.downloader import download
     from content_agent.video.gemini_analyzer import analyze_video, GeminiAnalysisError
@@ -293,29 +305,66 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
     if not match:
         return {"status": "configuration_error", "error": "Expected an Instagram /reel/<shortcode>/ URL"}
     report = RunReport(scanned=1, new_reels=1)
-    browser = InstagramBrowser(cfg)
+    if observed_metrics is not None and not isinstance(observed_metrics, dict):
+        return {"status": "configuration_error", "error": "observed_metrics must be an object"}
+
+    def observed_int(name: str) -> Optional[int]:
+        value = (observed_metrics or {}).get(name)
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError(f"observed_metrics.{name} must be a non-negative integer")
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"observed_metrics.{name} must be a non-negative integer") from exc
+        if parsed < 0:
+            raise ValueError(f"observed_metrics.{name} must be a non-negative integer")
+        return parsed
+
     try:
-        await browser.check_authentication()
-    except InstagramHumanActionRequired as exc:
-        report.status, report.human_action_required, report.human_action_reason = "human_action_required", True, str(exc)
-        return report.finish()
-    candidate = Candidate(source_url=source_url, shortcode=match.group(1), discovery_method="manual_url")
+        if observed_metrics is not None:
+            views, likes, comments = (observed_int("views"), observed_int("likes"), observed_int("comments"))
+            if views is None and likes is None and comments is None:
+                return {"status": "configuration_error", "error": "At least one visible metric is required"}
+            candidate = Candidate(
+                source_url=source_url,
+                shortcode=match.group(1),
+                creator_username=str(observed_metrics.get("creator_username") or "").lstrip("@"),
+                views=views,
+                likes=likes,
+                comments=comments,
+                followers=observed_int("followers"),
+                caption_preview=str(observed_metrics.get("caption_preview") or ""),
+                discovery_method="computer_use_visible_metrics",
+            )
+        else:
+            browser = InstagramBrowser(cfg)
+            try:
+                await browser.check_authentication()
+            except InstagramHumanActionRequired as exc:
+                report.status, report.human_action_required, report.human_action_reason = "human_action_required", True, str(exc)
+                return report.finish()
+            candidate = Candidate(source_url=source_url, shortcode=match.group(1), discovery_method="manual_url")
+    except ValueError as exc:
+        return {"status": "configuration_error", "error": str(exc)}
+
     calendar = NotionEditorialCalendar(cfg)
     apify_cost_usd = 0.0
     apify_cost_known = True
     try:
-        await browser.enrich(candidate, {})
-        # The direct/manual route is still a production artifact: preserve the
-        # same verifiable source metrics as the daily scout when the bounded
-        # Apify fallback is enabled. Browser data stays the free first choice.
-        if cfg.apify_metrics_fallback and cfg.apify_api_key:
-            try:
-                from content_agent.discovery.apify_metrics import enrich_reel_metrics
-                apify_result = await enrich_reel_metrics([candidate], cfg.apify_api_key, 1)
-                apify_cost_usd = apify_result.cost_usd or 0.0
-                apify_cost_known = apify_result.cost_usd is not None
-            except Exception as exc:
-                report.errors.append(f"apify_metrics_fallback_failed: {exc}")
+        if observed_metrics is None:
+            await browser.enrich(candidate, {})
+            # The legacy direct/manual route preserves its prior behavior. The
+            # Computer Use route above never imports or calls this fallback.
+            if cfg.apify_metrics_fallback and cfg.apify_api_key:
+                try:
+                    from content_agent.discovery.apify_metrics import enrich_reel_metrics
+                    apify_result = await enrich_reel_metrics([candidate], cfg.apify_api_key, 1)
+                    apify_cost_usd = apify_result.cost_usd or 0.0
+                    apify_cost_known = apify_result.cost_usd is not None
+                except Exception as exc:
+                    report.errors.append(f"apify_metrics_fallback_failed: {exc}")
         candidate.viral_ratio = viral_ratio(candidate.views, candidate.followers)
         context, recent, historical = fetch_angellos_context(), calendar.recent_content(), _historical_signals(cfg)
         reel = await download(candidate.source_url)

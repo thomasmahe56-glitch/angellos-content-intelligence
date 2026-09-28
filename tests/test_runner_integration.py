@@ -213,3 +213,55 @@ def test_manual_analysis_gets_one_quality_correction_before_creating(monkeypatch
     assert result["costs"]["apify_usd"] == 0.03
     assert created
     assert not video.exists()
+
+
+def test_computer_use_metrics_skip_browser_and_apify(monkeypatch, tmp_path):
+    video = tmp_path / "source.mp4"
+    video.write_bytes(b"video")
+
+    class Calendar:
+        def __init__(self, *_): pass
+        def recent_content(self): return []
+        def create(self, *_args, **_kwargs): return "https://www.notion.so/idea"
+
+    class Luna:
+        def __init__(self, *_): self.calls = 0
+        def estimated_cost_usd(self): return 0.0
+
+    class ForbiddenBrowser:
+        def __init__(self, *_):
+            raise AssertionError("Computer Use metrics must not start Playwright")
+
+    async def download(_): return {"local_path": str(video), "caption_originale": "visible caption"}
+    async def gemini(*_): return {"_gemini_model_used": "fake-gemini"}
+    async def adapt(client, *_):
+        client.calls += 1
+        return {"internal_title": "Faceless Angellos idea"}
+    async def quality(client, *_):
+        client.calls += 1
+        return {"approved": True, "issues": []}
+
+    download_module = types.ModuleType("content_agent.video.downloader")
+    download_module.download = download
+    gemini_module = types.ModuleType("content_agent.video.gemini_analyzer")
+    gemini_module.analyze_video = gemini
+    gemini_module.GeminiAnalysisError = RuntimeError
+    monkeypatch.setitem(sys.modules, "content_agent.video.downloader", download_module)
+    monkeypatch.setitem(sys.modules, "content_agent.video.gemini_analyzer", gemini_module)
+    monkeypatch.setattr(runner, "InstagramBrowser", ForbiddenBrowser)
+    monkeypatch.setattr(runner, "NotionEditorialCalendar", Calendar)
+    monkeypatch.setattr(runner, "LunaClient", Luna)
+    monkeypatch.setattr(runner, "adapt_to_angellos", adapt)
+    monkeypatch.setattr(runner, "quality_check", quality)
+    monkeypatch.setattr(runner, "fetch_angellos_context", lambda: "canonical context")
+
+    result = asyncio.run(runner.analyze_reel_url(
+        "https://www.instagram.com/reel/abc/",
+        observed_metrics={"likes": 58_800, "comments": 216, "creator_username": "creator", "caption_preview": "visible caption"},
+        cfg=Settings(apify_metrics_fallback=True, apify_api_key="must-not-be-used"),
+    ))
+
+    assert result["status"] == "completed"
+    assert result["content_ideas_created"] == 1
+    assert result["costs"]["apify_usd"] == 0.0
+    assert not video.exists()
