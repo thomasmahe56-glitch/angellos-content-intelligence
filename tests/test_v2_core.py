@@ -25,6 +25,10 @@ def test_profile_follower_parser_supports_singular_label():
     assert InstagramBrowser._metric_after("1 follower", "follower(?:s)?") == 1
 
 
+def test_reel_creator_prefers_detail_creator_link_over_own_navigation_link():
+    assert InstagramBrowser._creator_from_hrefs(["/reels/", "/angellos.ai/", "/realskytan/reels/"]) == "realskytan"
+
+
 def test_viral_ratio():
     assert viral_ratio(100_000, 20_000) == 5
 

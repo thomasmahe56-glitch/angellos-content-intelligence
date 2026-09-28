@@ -169,6 +169,16 @@ class InstagramBrowser:
     @staticmethod
     async def _creator(page: Page) -> str:
         links = await page.eval_on_selector_all('a[href^="/"]', "els => els.map(e => e.getAttribute('href'))")
+        return InstagramBrowser._creator_from_hrefs(links)
+
+    @staticmethod
+    def _creator_from_hrefs(links) -> str:
+        # On Reel detail pages, the creator link is /username/reels/ while
+        # account-navigation links such as /angellos.ai/ occur earlier.
+        for href in links:
+            match = re.fullmatch(r"/([A-Za-z0-9._]+)/reels/", href or "")
+            if match and match.group(1) != "reels":
+                return match.group(1)
         for href in links:
             if href and re.fullmatch(r"/[A-Za-z0-9._]+/", href) and href.strip("/") not in {"reel", "reels", "explore", "accounts"}:
                 return href.strip("/")
