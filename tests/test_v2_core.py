@@ -13,6 +13,7 @@ from content_agent.discovery.apify_metrics import _cost_usd, _creator_username, 
 from content_agent.runner import _qualified_rank, _set_cost_report
 from content_agent.models.schemas import RunReport
 from content_agent.intelligence.luna_client import LunaClient
+from content_agent.intelligence.adaptation import adapt_to_angellos, quality_check
 
 
 def test_metric_normalization():
@@ -220,3 +221,23 @@ def test_luna_omits_temperature_unless_explicitly_configured(monkeypatch):
     client = LunaClient(Settings(openai_api_key="key"))
     asyncio.run(client.json("system", "prompt", {"type": "object"}))
     assert "temperature" not in captured
+
+
+def test_adaptation_and_quality_prompts_protect_against_unverified_ctas():
+    class Luna:
+        def __init__(self): self.prompts = []
+        async def json(self, system, prompt, _schema):
+            self.prompts.append((system, prompt))
+            return {"approved": True, "issues": []} if "quality gate" in system else {"source": {}}
+
+    luna = Luna()
+    candidate = Candidate(source_url="https://www.instagram.com/reel/abc/", shortcode="abc")
+    asyncio.run(adapt_to_angellos(luna, candidate, {}, "canonical product facts", [], {}, "English"))
+    asyncio.run(quality_check(luna, {}, "canonical product facts", []))
+
+    adaptation_prompt = luna.prompts[0][1]
+    quality_system = luna.prompts[1][0]
+    assert "Do not invent a lead magnet" in adaptation_prompt
+    assert "65 English words or fewer" in adaptation_prompt
+    assert "Follow @angellos.ai for practical qualification systems." in adaptation_prompt
+    assert "does not require a promised reply" in quality_system
