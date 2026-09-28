@@ -232,6 +232,11 @@ def _generate_with_model(model_name: str, video_file, prompt: str) -> dict:
         analysis = {"raw_response": raw}
 
     analysis["_gemini_model_used"] = model_name
+    usage = getattr(response, "usage_metadata", None)
+    analysis["_gemini_usage"] = {
+        "input_tokens": int(getattr(usage, "prompt_token_count", 0) or 0),
+        "output_tokens": int(getattr(usage, "candidates_token_count", 0) or 0),
+    }
     return analysis
 
 

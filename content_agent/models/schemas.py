@@ -51,6 +51,8 @@ class RunReport:
     created_items: list[dict[str, Any]] = field(default_factory=list)
     ai_calls: dict[str, int] = field(default_factory=lambda: {"luna": 0, "gemini": 0})
     videos_downloaded: int = 0
+    gemini_input_tokens: int = 0
+    gemini_output_tokens: int = 0
     errors: list[str] = field(default_factory=list)
     costs: dict[str, Any] = field(default_factory=dict)
 

@@ -170,6 +170,7 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
                 continue
             report.ai_calls["gemini"] += 1
             report.videos_analyzed += 1
+            _record_gemini_usage(report, gemini)
             event(logger, "GEMINI analyzed", shortcode=candidate.shortcode)
             StateStore.mark(state, candidate, "analyzed", gemini_analysis_available=True, gemini_model=gemini.get("_gemini_model_used", ""))
             adaptation = await adapt_to_angellos(luna, candidate, gemini, context, recent, historical, cfg.content_language)
@@ -261,6 +262,7 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
             return report.finish()
         report.ai_calls["gemini"] = 1
         report.videos_analyzed = 1
+        _record_gemini_usage(report, gemini)
         luna = LunaClient(cfg)
         adaptation = await adapt_to_angellos(luna, candidate, gemini, context, recent, historical, cfg.content_language)
         gate = await quality_check(luna, adaptation, context, recent)
@@ -344,10 +346,7 @@ def _qualified_rank(item):
 
 def _set_cost_report(report: RunReport, cfg: Settings, luna, apify_cost_usd: float, apify_cost_known: bool) -> None:
     luna_cost = getattr(luna, "estimated_cost_usd", lambda: None)()
-    gemini_cost = 0.0 if not report.videos_analyzed else (
-        report.videos_analyzed * cfg.gemini_analysis_usd_per_video
-        if cfg.gemini_analysis_usd_per_video is not None else None
-    )
+    gemini_cost = _gemini_cost(report, cfg)
     values = {"apify_usd": apify_cost_usd if apify_cost_known else None, "luna_usd": luna_cost, "gemini_usd": gemini_cost}
     total = sum(values.values()) if all(value is not None for value in values.values()) else None
     report.costs = {
@@ -360,6 +359,8 @@ def _set_cost_report(report: RunReport, cfg: Settings, luna, apify_cost_usd: flo
         "luna_input_tokens": getattr(luna, "input_tokens", 0),
         "luna_output_tokens": getattr(luna, "output_tokens", 0),
         "gemini_videos": report.videos_analyzed,
+        "gemini_input_tokens": report.gemini_input_tokens,
+        "gemini_output_tokens": report.gemini_output_tokens,
     }
 
 
@@ -374,15 +375,37 @@ def _unknown_cost_report() -> dict:
         "luna_input_tokens": 0,
         "luna_output_tokens": 0,
         "gemini_videos": 0,
+        "gemini_input_tokens": 0,
+        "gemini_output_tokens": 0,
     }
 
 
 def _cost_report_without_luna(report: RunReport, cfg: Settings, apify_cost_usd: float, apify_cost_known: bool) -> dict:
     """Report known collection/perception costs when Gemini fails before Luna."""
-    gemini_cost = report.videos_analyzed * cfg.gemini_analysis_usd_per_video if cfg.gemini_analysis_usd_per_video is not None else None
+    gemini_cost = _gemini_cost(report, cfg)
     values = {"apify_usd": apify_cost_usd if apify_cost_known else None, "luna_usd": 0.0, "gemini_usd": gemini_cost}
     total = sum(values.values()) if all(value is not None for value in values.values()) else None
-    return {**values, "total_usd": total, "currency": "USD", "complete": total is not None, "luna_input_tokens": 0, "luna_output_tokens": 0, "gemini_videos": report.videos_analyzed}
+    return {**values, "total_usd": total, "currency": "USD", "complete": total is not None, "luna_input_tokens": 0, "luna_output_tokens": 0, "gemini_videos": report.videos_analyzed, "gemini_input_tokens": report.gemini_input_tokens, "gemini_output_tokens": report.gemini_output_tokens}
+
+
+def _record_gemini_usage(report: RunReport, analysis: dict) -> None:
+    usage = analysis.get("_gemini_usage", {}) if isinstance(analysis, dict) else {}
+    if not isinstance(usage, dict):
+        return
+    report.gemini_input_tokens += int(usage.get("input_tokens", 0) or 0)
+    report.gemini_output_tokens += int(usage.get("output_tokens", 0) or 0)
+
+
+def _gemini_cost(report: RunReport, cfg: Settings):
+    input_rate = cfg.gemini_input_usd_per_million_tokens
+    output_rate = cfg.gemini_output_usd_per_million_tokens
+    if input_rate is not None and output_rate is not None:
+        return (report.gemini_input_tokens * input_rate + report.gemini_output_tokens * output_rate) / 1_000_000
+    if not report.videos_analyzed:
+        return 0.0
+    if cfg.gemini_analysis_usd_per_video is not None:
+        return report.videos_analyzed * cfg.gemini_analysis_usd_per_video
+    return None
 
 
 async def sync_performance(cfg: Settings = settings) -> dict:

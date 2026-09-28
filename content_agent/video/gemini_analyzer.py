@@ -32,6 +32,7 @@ def parse_gemini_json(data: Any) -> dict:
         "replicable_creative_pattern": data.get("pattern_replicable", ""),
         "notable_details": data.get("elements_visuels_cles", []),
         "_gemini_model_used": data.get("_gemini_model_used", ""),
+        "_gemini_usage": data.get("_gemini_usage", {}),
     }
 
 

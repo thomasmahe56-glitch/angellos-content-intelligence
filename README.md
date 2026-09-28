@@ -38,7 +38,7 @@ Required production variables:
 OPENAI_API_KEY=
 OPENAI_CONTENT_MODEL=gpt-5.6-luna
 GEMINI_API_KEY=
-GEMINI_VIDEO_MODEL=gemini-2.0-flash
+GEMINI_VIDEO_MODEL=gemini-2.5-flash
 NOTION_API_KEY=
 NOTION_PROGRAMME_CONTENT_DB=
 NOTION_CONTENT_AGENT_STATE_PAGE_ID=
@@ -60,6 +60,8 @@ DELETE_SOURCE_VIDEO_AFTER_ANALYSIS=true
 CONTENT_AGENT_LOG_FORMAT=json
 LUNA_INPUT_USD_PER_MILLION_TOKENS=
 LUNA_OUTPUT_USD_PER_MILLION_TOKENS=
+GEMINI_INPUT_USD_PER_MILLION_TOKENS=
+GEMINI_OUTPUT_USD_PER_MILLION_TOKENS=
 GEMINI_ANALYSIS_USD_PER_VIDEO=
 ```
 
@@ -67,8 +69,10 @@ GEMINI_ANALYSIS_USD_PER_VIDEO=
 dry-runs. Never set it in Railway production.
 
 Every scout report includes a `costs` object in USD. Apify reports its actual
-run charge when available; configure the Luna token rates and Gemini per-video
-rate above to complete the total. The report never invents a provider price.
+run charge when available; configure the Luna and Gemini token rates above to
+complete the total. `GEMINI_ANALYSIS_USD_PER_VIDEO` is a legacy fallback; token
+usage is preferred because video duration changes the charge. The report never
+invents a provider price.
 
 `NOTION_CONTENT_AGENT_STATE_PAGE_ID` must be a private, dedicated Notion page shared
 with the integration. It keeps compact candidate state, follower cache and dedupe

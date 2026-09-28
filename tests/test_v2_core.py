@@ -10,7 +10,7 @@ from content_agent.runner import analyze_reel_url
 from content_agent.discovery.instagram_browser import InstagramBrowser
 from content_agent.config import is_configured
 from content_agent.discovery.apify_metrics import _cost_usd, _creator_username, _number, _shortcode
-from content_agent.runner import _qualified_rank, _set_cost_report
+from content_agent.runner import _qualified_rank, _set_cost_report, _record_gemini_usage
 from content_agent.models.schemas import RunReport
 from content_agent.intelligence.luna_client import LunaClient
 from content_agent.intelligence.adaptation import adapt_to_angellos, quality_check
@@ -200,6 +200,19 @@ def test_cost_report_only_claims_total_when_all_used_services_have_rates():
     _set_cost_report(report, cfg, Luna(), apify_cost_usd=0.05, apify_cost_known=True)
     assert report.costs["total_usd"] == 0.45
     assert report.costs["complete"] is True
+
+
+def test_cost_report_uses_actual_gemini_token_usage_when_rates_are_configured():
+    class Luna:
+        input_tokens = output_tokens = 0
+        def estimated_cost_usd(self): return 0.0
+
+    report = RunReport(videos_analyzed=1)
+    _record_gemini_usage(report, {"_gemini_usage": {"input_tokens": 100_000, "output_tokens": 10_000}})
+    cfg = Settings(gemini_input_usd_per_million_tokens=0.30, gemini_output_usd_per_million_tokens=2.50)
+    _set_cost_report(report, cfg, Luna(), apify_cost_usd=0.0, apify_cost_known=True)
+    assert report.costs["gemini_usd"] == 0.055
+    assert report.costs["total_usd"] == 0.055
 
 
 def test_historical_signals_prefer_durable_notion_ledger_over_local_cache():
