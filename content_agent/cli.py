@@ -16,6 +16,7 @@ def main() -> None:
     scout.add_argument("--once", action="store_true")
     scout.add_argument("--dry-run", action="store_true")
     scout.add_argument("--json", action="store_true")
+    scout.add_argument("--hermes", action="store_true", help="emit the compact Hermes event contract")
     scout.add_argument("--max-reels", type=int)
     scout.add_argument("--max-content", type=int)
     analyze = sub.add_parser("analyze")
@@ -46,6 +47,9 @@ def main() -> None:
         else:
             from content_agent.runner import run_daily_scout
             result = asyncio.run(run_daily_scout(dry_run=args.dry_run, max_reels=args.max_reels, max_content=args.max_content))
+    if args.command == "scout" and args.hermes:
+        from content_agent.integrations.hermes import event_from_report
+        result = event_from_report(result)
     print(json.dumps(result, ensure_ascii=False))
     status = result.get("status")
     sys.exit(2 if result.get("human_action_required") else 3 if status == "configuration_error" else 1 if status == "partial_failure" else 0)

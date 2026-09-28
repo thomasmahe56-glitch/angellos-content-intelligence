@@ -11,6 +11,13 @@ automation boundary is:
 python -m content_agent scout --once --json
 ```
 
+For Hermes, use the same bounded command with its compact, secret-free event
+contract:
+
+```bash
+python -m content_agent scout --once --hermes
+```
+
 ## Setup
 
 Install dependencies and Playwright Chromium:
@@ -71,6 +78,7 @@ python -m content_agent health
 python -m content_agent scout --once --dry-run --max-reels 10 --max-content 1
 python -m content_agent analyze https://www.instagram.com/reel/SHORTCODE/ --dry-run
 python -m content_agent scout --once --json
+python -m content_agent scout --once --hermes
 python -m content_agent sync-performance
 ```
 
