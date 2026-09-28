@@ -64,7 +64,10 @@ def _fetch_product_context() -> str:
     excerpts = []
     for page in response.get("results", []):
         title = _title_of(page)
-        content = _page_text(page["id"], max_chars=_CONTEXT_CHARS)
+        # Product context databases often store the canonical copy in a rich
+        # text property rather than page blocks. Prefer the page body when it
+        # exists, then read those semantic properties as a safe fallback.
+        content = _page_text(page["id"], max_chars=_CONTEXT_CHARS) or _property_text(page, max_chars=_CONTEXT_CHARS)
         if content:
             excerpts.append(f"**{title}**\n{content}")
 
@@ -117,6 +120,18 @@ def _block_text(block: dict) -> str:
     content = block.get(btype, {})
     rich_texts = content.get("rich_text", [])
     return "".join(rt.get("plain_text", "") for rt in rich_texts)
+
+
+def _property_text(page: dict, max_chars: int = 800) -> str:
+    """Extract human-authored rich text from a Notion DB row, not metadata."""
+    values = []
+    for name, prop in page.get("properties", {}).items():
+        if prop.get("type") != "rich_text":
+            continue
+        text = "".join(item.get("plain_text", "") for item in prop.get("rich_text", []))
+        if text:
+            values.append(f"{name}: {text}")
+    return "\n".join(values)[:max_chars]
 
 
 def fetch_performance_patterns() -> str:
