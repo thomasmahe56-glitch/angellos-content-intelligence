@@ -124,6 +124,20 @@ async def agent_analyze(request: Request):
     return JSONResponse(result, status_code=200 if result.get("status") == "completed" else 207)
 
 
+@app.post("/agent/analyze-batch")
+async def agent_analyze_batch(request: Request):
+    """Analyze a bounded batch of already CUA-observed Reels concurrently."""
+    _require_agent_token(request)
+    body = await request.json()
+    from content_agent.runner import analyze_batch
+    result = await analyze_batch(
+        body.get("candidates"),
+        run_id=str(body.get("run_id") or ""),
+        dry_run=bool(body.get("dry_run", False)),
+    )
+    return JSONResponse(result, status_code=200 if result.get("status") == "completed" else 207)
+
+
 @app.post("/agent/sync-performance")
 async def agent_sync_performance(request: Request):
     """Refresh published-content learning through the protected V2 boundary."""

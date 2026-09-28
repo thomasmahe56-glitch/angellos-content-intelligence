@@ -69,6 +69,12 @@ class Settings:
     discovery_max_reels_per_run: int = _int("DISCOVERY_MAX_REELS_PER_RUN", 100)
     qualified_max_per_run: int = _int("QUALIFIED_MAX_PER_RUN", 5)
     analyze_max_per_run: int = _int("ANALYZE_MAX_PER_RUN", 5)
+    # A batch is an explicitly bounded production window.  It keeps the
+    # normal single-run safety cap intact while allowing a caller that has
+    # already collected visible Computer Use metrics to process a full month
+    # in one request.  The bound is deliberately finite and configurable.
+    analyze_batch_max_candidates: int = _int("ANALYZE_BATCH_MAX_CANDIDATES", 31)
+    analyze_batch_concurrency: int = _int("ANALYZE_BATCH_CONCURRENCY", 3)
     scout_scroll_limit: int = _int("SCOUT_SCROLL_LIMIT", 30)
     scout_max_runtime_minutes: int = _int("SCOUT_MAX_RUNTIME_MINUTES", 20)
     content_language: str = os.getenv("CONTENT_LANGUAGE", "EN")

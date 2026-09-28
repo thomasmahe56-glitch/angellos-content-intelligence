@@ -26,6 +26,7 @@ from phase2_analysis.notion_context import fetch_angellos_context
 # fallback keeps a malformed legacy ledger from stopping a live run; the
 # current-run page count is still read from the canonical Notion database.
 _PROCESS_RUN_RESERVATIONS: dict[str, set[str]] = {}
+_ANALYSIS_RESERVATION_LOCK = asyncio.Lock()
 
 
 async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = None, max_content: Optional[int] = None, retry_insufficient_metrics: bool = False, cfg: Settings = settings) -> dict:
@@ -295,6 +296,7 @@ async def analyze_reel_url(
     dry_run: bool = False,
     observed_metrics: Optional[dict] = None,
     run_id: str = "",
+    batch_mode: bool = False,
     cfg: Settings = settings,
 ) -> dict:
     """Analyze one supplied Reel through Gemini→Luna safety gates.
@@ -374,33 +376,38 @@ async def analyze_reel_url(
         if observed_metrics is not None:
             state_store = StateStore(cfg)
             reserved = False
-            try:
-                if state_store.durable:
-                    state = state_store.load(strict=True)
-                    reserved = StateStore.reserve_run_analysis(state, candidate.run_id, candidate.key, cfg.analyze_max_per_run)
+            maximum = cfg.analyze_batch_max_candidates if batch_mode else cfg.analyze_max_per_run
+            # Serialise only the tiny reservation section.  Downloads and
+            # Gemini/Luna calls remain concurrent in batch mode, avoiding
+            # races in the durable Notion ledger without sacrificing throughput.
+            async with _ANALYSIS_RESERVATION_LOCK:
+                try:
+                    if state_store.durable:
+                        state = state_store.load(strict=True)
+                        reserved = StateStore.reserve_run_analysis(state, candidate.run_id, candidate.key, maximum)
+                        if reserved:
+                            state_store.save(state)
+                    elif dry_run or cfg.allow_ephemeral_state:
+                        state = state_store.load(strict=False)
+                        reserved = StateStore.reserve_run_analysis(state, candidate.run_id, candidate.key, maximum)
+                        if reserved:
+                            state_store.save(state)
+                    else:
+                        return {"status": "configuration_error", "error": "NOTION_CONTENT_AGENT_STATE_PAGE_ID is required for durable Computer Use cost caps"}
+                except Exception as exc:
+                    # Do not erase or overwrite an existing state page to repair a
+                    # legacy ledger in the middle of a paid run.  Count the current
+                    # run's committed pages and reserve the remainder in memory.
+                    event(get_logger(cfg.log_format == "json"), "Run ledger fallback", run_id=candidate.run_id, error=str(exc))
+                    current = _PROCESS_RUN_RESERVATIONS.setdefault(candidate.run_id, set())
+                    committed = calendar.count_run_items(candidate.run_id)
+                    reserved = candidate.key in current or committed + len(current) < maximum
                     if reserved:
-                        state_store.save(state)
-                elif dry_run or cfg.allow_ephemeral_state:
-                    state = state_store.load(strict=False)
-                    reserved = StateStore.reserve_run_analysis(state, candidate.run_id, candidate.key, cfg.analyze_max_per_run)
-                    if reserved:
-                        state_store.save(state)
-                else:
-                    return {"status": "configuration_error", "error": "NOTION_CONTENT_AGENT_STATE_PAGE_ID is required for durable Computer Use cost caps"}
-            except Exception as exc:
-                # Do not erase or overwrite an existing state page to repair a
-                # legacy ledger in the middle of a paid run.  Count the current
-                # run's committed pages and reserve the remainder in memory.
-                event(get_logger(cfg.log_format == "json"), "Run ledger fallback", run_id=candidate.run_id, error=str(exc))
-                current = _PROCESS_RUN_RESERVATIONS.setdefault(candidate.run_id, set())
-                committed = calendar.count_run_items(candidate.run_id)
-                reserved = candidate.key in current or committed + len(current) < cfg.analyze_max_per_run
-                if reserved:
-                    current.add(candidate.key)
+                        current.add(candidate.key)
             if not reserved:
                 return {
                     "status": "budget_exhausted",
-                    "error": f"Computer Use run reached ANALYZE_MAX_PER_RUN={cfg.analyze_max_per_run}",
+                    "error": f"Computer Use run reached analysis cap={maximum}",
                     "run_id": candidate.run_id,
                 }
         if observed_metrics is None:
@@ -469,6 +476,80 @@ async def analyze_reel_url(
                 Path(reel["local_path"]).unlink(missing_ok=True)
         except OSError:
             pass
+
+
+async def analyze_batch(
+    candidates: list[dict],
+    *,
+    run_id: str,
+    dry_run: bool = False,
+    cfg: Settings = settings,
+) -> dict:
+    """Process a bounded set of CUA-observed candidates concurrently.
+
+    Discovery and metric collection stay outside this endpoint.  Every item
+    must carry visible metrics, while dedupe and the durable reservation gate
+    still happen inside ``analyze_reel_url``.  This gives production a fast
+    path to a 31-day batch without weakening the ordinary single-run cap.
+    """
+    if not run_id.strip():
+        return {"status": "configuration_error", "error": "run_id is required for a batch"}
+    if not isinstance(candidates, list) or not candidates:
+        return {"status": "configuration_error", "error": "candidates must be a non-empty array"}
+    if len(candidates) > cfg.analyze_batch_max_candidates:
+        return {"status": "configuration_error", "error": f"batch supports at most {cfg.analyze_batch_max_candidates} candidates"}
+    seen: set[str] = set()
+    normalized: list[dict] = []
+    for item in candidates:
+        if not isinstance(item, dict):
+            return {"status": "configuration_error", "error": "each candidate must be an object"}
+        url = str(item.get("url") or "").strip()
+        if not url:
+            return {"status": "configuration_error", "error": "each candidate requires a Reel URL"}
+        if url.rstrip("/") in seen:
+            continue
+        seen.add(url.rstrip("/"))
+        normalized.append({"url": url, "observed_metrics": item.get("observed_metrics")})
+    semaphore = asyncio.Semaphore(max(1, min(cfg.analyze_batch_concurrency, len(normalized))))
+
+    async def process(item: dict) -> dict:
+        async with semaphore:
+            return await analyze_reel_url(
+                item["url"],
+                dry_run=dry_run,
+                observed_metrics=item["observed_metrics"],
+                run_id=run_id.strip()[:128],
+                batch_mode=True,
+                cfg=cfg,
+            )
+
+    results = await asyncio.gather(*(process(item) for item in normalized))
+    created: list[dict] = []
+    errors: list[str] = []
+    costs: dict[str, float] = {}
+    completed = 0
+    for result in results:
+        created.extend(result.get("created_items", []))
+        errors.extend(result.get("errors", []))
+        if result.get("status") in {"completed", "duplicate"}:
+            completed += 1
+        for key, value in (result.get("costs") or {}).items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                costs[key] = costs.get(key, 0.0) + value
+    status = "completed" if not errors and completed == len(results) else "partial_failure"
+    return {
+        "status": status,
+        "run_id": run_id.strip()[:128],
+        "batch_size": len(results),
+        "completed": completed,
+        "failed": len(results) - completed,
+        "content_ideas_created": len([item for item in created if not item.get("deduplicated")]),
+        "duplicates": len([item for item in created if item.get("deduplicated")]),
+        "created_items": created,
+        "errors": errors,
+        "costs": costs,
+        "results": results,
+    }
 
 
 async def _creator_baseline(browser: InstagramBrowser, state: dict, candidate, cfg: Settings):

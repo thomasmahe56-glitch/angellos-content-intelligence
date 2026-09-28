@@ -23,6 +23,16 @@ When calling the deployed service instead, use its bearer-protected V2 routes:
 The latter persists learning signals to the dedicated Notion state page; it does
 not rely on Railway disk.
 
+For a production content window, submit the CUA-observed candidates in one
+bounded `POST /agent/analyze-batch` request. The endpoint deduplicates URLs before
+any download or LLM call, limits the batch with `ANALYZE_BATCH_MAX_CANDIDATES`
+(31 by default), and runs up to `ANALYZE_BATCH_CONCURRENCY` analyses (3 by
+default) concurrently. The ordinary `/agent/analyze` cap remains unchanged for
+single-candidate calls; the batch cap is the explicit, finite production budget.
+Every candidate must include only metrics visibly read in Instagram and the
+response aggregates Notion URLs, errors, token costs, and the exact `run_id` for
+ARIA.
+
 ## Setup
 
 Install dependencies and Playwright Chromium:
@@ -61,6 +71,9 @@ OUTLIER_ABSOLUTE_MIN_COMMENTS=75
 DISCOVERY_MAX_REELS_PER_RUN=100
 QUALIFIED_MAX_PER_RUN=5
 ANALYZE_MAX_PER_RUN=5
+# Explicit finite production batch budget and concurrency
+ANALYZE_BATCH_MAX_CANDIDATES=31
+ANALYZE_BATCH_CONCURRENCY=3
 SCOUT_SCROLL_LIMIT=30
 SCOUT_MAX_RUNTIME_MINUTES=20
 CONTENT_LANGUAGE=EN
