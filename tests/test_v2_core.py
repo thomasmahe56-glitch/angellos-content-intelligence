@@ -21,6 +21,10 @@ def test_metric_normalization():
     assert parse_compact_number("1,2 M") == 1_200_000
 
 
+def test_profile_follower_parser_supports_singular_label():
+    assert InstagramBrowser._metric_after("1 follower", "follower(?:s)?") == 1
+
+
 def test_viral_ratio():
     assert viral_ratio(100_000, 20_000) == 5
 

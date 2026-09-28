@@ -61,6 +61,7 @@ class Settings:
     content_publish_days: tuple[str, ...] = tuple(x.strip().upper() for x in os.getenv("CONTENT_PUBLISH_DAYS", "").split(",") if x.strip())
     content_items_per_day: int = _int("CONTENT_ITEMS_PER_DAY", 0)
     follower_cache_ttl_hours: int = _int("FOLLOWER_CACHE_TTL_HOURS", 72)
+    angellos_instagram_account: str = os.getenv("ANGELLOS_INSTAGRAM_ACCOUNT", os.getenv("ANGELLOS_ACCOUNT", "angellos.ai")).strip().lstrip("@").lower()
     seed_accounts: tuple[str, ...] = tuple(x.strip().lstrip("@") for x in os.getenv("INSTAGRAM_SEED_ACCOUNTS", "").split(",") if x.strip())
     dream100_accounts: tuple[str, ...] = tuple(x.strip().lstrip("@") for x in os.getenv("DREAM100_ACCOUNTS", "").split(",") if x.strip())
     log_format: str = os.getenv("CONTENT_AGENT_LOG_FORMAT", "text").lower()

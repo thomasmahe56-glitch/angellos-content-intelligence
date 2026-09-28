@@ -161,7 +161,7 @@ class InstagramBrowser:
             await page.goto(f"https://www.instagram.com/{creator}/", wait_until="domcontentloaded", timeout=45_000)
             await self._raise_if_challenge(page)
             text = await page.locator("body").inner_text(timeout=10_000)
-            match = re.search(r"([0-9][0-9.,\s]*[KM]?)\s+followers", text, re.I)
+            match = re.search(r"([0-9][0-9.,\s]*[KM]?)\s+follower(?:s)?", text, re.I)
             return parse_compact_number(match.group(1)) if match else None
         finally:
             await page.close()

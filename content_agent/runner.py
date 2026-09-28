@@ -91,6 +91,9 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
             if candidate.media_is_video is False:
                 StateStore.mark(state, candidate, "rejected_non_video")
                 continue
+            if candidate.creator_username.lower().lstrip("@") == cfg.angellos_instagram_account:
+                StateStore.mark(state, candidate, "rejected_own_account")
+                continue
             candidate.viral_ratio = viral_ratio(candidate.views, candidate.followers)
             report.new_reels += 1
             if candidate.viral_ratio is None:
