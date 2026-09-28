@@ -32,7 +32,12 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
         report.status = "configuration_error"
         report.errors = ["NOTION_CONTENT_AGENT_STATE_PAGE_ID is required for durable production state"]
         return report.finish()
-    state = state_store.load()
+    try:
+        state = state_store.load(strict=state_store.durable and not cfg.allow_ephemeral_state)
+    except Exception as exc:
+        report.status = "partial_failure"
+        report.errors = [f"durable_state_unavailable: {exc}"]
+        return report.finish()
     browser = InstagramBrowser(cfg)
     try:
         await browser.check_authentication()

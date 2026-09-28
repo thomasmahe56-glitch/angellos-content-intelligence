@@ -99,6 +99,21 @@ def test_state_store_rejects_placeholder_page_id():
     assert not StateStore(Settings(notion_api_key="key", notion_state_page_id="__REPLACE_ME__")).durable
 
 
+def test_state_store_strict_mode_rejects_durable_read_failure(tmp_path):
+    class BrokenBlocks:
+        children = None
+    class BrokenNotion:
+        blocks = BrokenBlocks()
+    store = StateStore(Settings(notion_api_key="key", notion_state_page_id="page"))
+    store.notion = BrokenNotion()
+    try:
+        store.load(strict=True)
+    except RuntimeError as exc:
+        assert "durable state read failed" in str(exc)
+        return
+    assert False
+
+
 def test_health_counts_cookie_auth_as_instagram_ready():
     from content_agent.runner import health
     assert health(Settings(instagram_cookies_b64="Y29va2ll")).get("instagram_session_ready") is True

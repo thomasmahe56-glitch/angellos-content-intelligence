@@ -26,7 +26,7 @@ class StateStore:
     def durable(self) -> bool:
         return self.notion is not None
 
-    def load(self) -> dict[str, Any]:
+    def load(self, *, strict: bool = False) -> dict[str, Any]:
         if self.notion:
             try:
                 blocks = self._notion_blocks()
@@ -37,9 +37,12 @@ class StateStore:
                 )
                 if payload:
                     return json.loads(payload)
-            except Exception:
+            except Exception as exc:
                 # A transient Notion failure must not erase local recovery state.
-                pass
+                # Production callers use strict mode: stale Railway disk state
+                # is not a safe substitute for the durable idempotency ledger.
+                if strict:
+                    raise RuntimeError("durable state read failed") from exc
         try:
             return json.loads(self.path.read_text())
         except (FileNotFoundError, json.JSONDecodeError):
