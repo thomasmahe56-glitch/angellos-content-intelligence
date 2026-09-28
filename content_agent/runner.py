@@ -387,7 +387,6 @@ def _cost_report_without_luna(report: RunReport, cfg: Settings, apify_cost_usd: 
 
 async def sync_performance(cfg: Settings = settings) -> dict:
     """Refresh @angellos.ai stats then let Luna write explicitly non-deterministic signals."""
-    from stats.notion_sync import sync_instagram_stats
     from content_agent.intelligence.performance_learning import analyze_performance_signals, save_patterns
     state_store = StateStore(cfg)
     if not state_store.durable and not cfg.allow_ephemeral_state:
@@ -396,16 +395,31 @@ async def sync_performance(cfg: Settings = settings) -> dict:
         state = state_store.load(strict=state_store.durable and not cfg.allow_ephemeral_state)
     except Exception as exc:
         return {"status": "partial_failure", "errors": [f"durable_state_unavailable: {exc}"], "costs": _unknown_cost_report()}
+    calendar = NotionEditorialCalendar(cfg)
     try:
-        stats_result = await sync_instagram_stats()
-        calendar = NotionEditorialCalendar(cfg)
+        from stats.instagram_stats import fetch_my_reels
+        reels = await fetch_my_reels(limit=50)
+        stats_result = calendar.sync_published_metrics(reels, "instagram_graph")
+        apify_cost_usd, apify_cost_known = 0.0, True
+    except Exception as graph_exc:
+        if not (cfg.apify_metrics_fallback and cfg.apify_api_key):
+            return {"status": "partial_failure", "errors": [f"performance_data_sync_failed: {graph_exc}"], "costs": _unknown_cost_report()}
+        try:
+            from content_agent.discovery.apify_metrics import fetch_account_reels
+            result = await fetch_account_reels(cfg.angellos_instagram_account, cfg.apify_api_key, limit=50)
+            stats_result = calendar.sync_published_metrics(result.reels, "apify")
+            apify_cost_usd = result.cost_usd or 0.0
+            apify_cost_known = result.cost_usd is not None
+        except Exception as apify_exc:
+            return {"status": "partial_failure", "errors": [f"performance_data_sync_failed: graph={graph_exc}; apify={apify_exc}"], "costs": _unknown_cost_report()}
+    try:
         rows = calendar.performance_rows()
     except Exception as exc:
         return {"status": "partial_failure", "errors": [f"performance_data_sync_failed: {exc}"], "costs": _unknown_cost_report()}
     client = LunaClient(cfg)
     if not rows:
         report = RunReport()
-        _set_cost_report(report, cfg, client, 0.0, True)
+        _set_cost_report(report, cfg, client, apify_cost_usd, apify_cost_known)
         return {"status": "completed", "stats_sync": stats_result, "performance_rows": 0, "ai_calls": {"luna": 0}, "patterns_updated": False, "costs": report.costs}
     try:
         patterns = await analyze_performance_signals(client, rows)
@@ -413,7 +427,7 @@ async def sync_performance(cfg: Settings = settings) -> dict:
         report = RunReport()
         report.status, report.errors = "partial_failure", [f"performance_learning_failed: {exc}"]
         report.ai_calls["luna"] = client.calls
-        _set_cost_report(report, cfg, client, 0.0, True)
+        _set_cost_report(report, cfg, client, apify_cost_usd, apify_cost_known)
         return report.finish()
     save_patterns(patterns)
     # Railway disk is ephemeral; the Notion ledger is the authoritative memory
@@ -426,11 +440,11 @@ async def sync_performance(cfg: Settings = settings) -> dict:
         report = RunReport()
         report.status, report.errors = "partial_failure", [f"state_persistence_failed: {exc}"]
         report.ai_calls["luna"] = client.calls
-        _set_cost_report(report, cfg, client, 0.0, True)
+        _set_cost_report(report, cfg, client, apify_cost_usd, apify_cost_known)
         return report.finish()
     report = RunReport()
     report.ai_calls["luna"] = client.calls
-    _set_cost_report(report, cfg, client, 0.0, True)
+    _set_cost_report(report, cfg, client, apify_cost_usd, apify_cost_known)
     return {"status": "completed", "stats_sync": stats_result, "performance_rows": len(rows), "ai_calls": {"luna": client.calls}, "patterns_updated": True, "costs": report.costs}
 
 

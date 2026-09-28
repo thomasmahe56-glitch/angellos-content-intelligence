@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Optional
 
 from notion_client import Client
@@ -66,6 +67,90 @@ class NotionEditorialCalendar:
                 return rows
             cursor = response.get("next_cursor")
 
+    def sync_published_metrics(self, reels: list[dict[str, Any]], source: str) -> dict[str, Any]:
+        """Write observed own-account metrics into this editorial calendar only.
+
+        A post is matched by an existing Instagram URL when available, otherwise
+        by the closest already-Published editorial date in a conservative window.
+        Planned ideas are never promoted or updated as published by this method.
+        """
+        self._require()
+        self._ensure_performance_properties()
+        pages = self._all_pages()
+        used_page_ids: set[str] = set()
+        updated = 0
+        for reel in reels:
+            page = self._match_published_page(reel, pages, used_page_ids)
+            if not page:
+                continue
+            properties: dict[str, Any] = {}
+            values = {
+                "Vues IG": reel.get("views"),
+                "Likes IG": reel.get("likes"),
+                "Commentaires IG": reel.get("comments"),
+                "Saves IG": reel.get("saves"),
+                "Reach IG": reel.get("reach"),
+                "Partages IG": reel.get("shares"),
+            }
+            for name, value in values.items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    properties[name] = {"number": value}
+            if properties:
+                self.client.pages.update(page_id=page["id"], properties=properties)
+                used_page_ids.add(page["id"])
+                updated += 1
+        return {"source": source, "reels_observed": len(reels), "updated": updated, "skipped": len(reels) - updated}
+
+    def _ensure_performance_properties(self) -> None:
+        stats = {"Vues IG": "number", "Saves IG": "number", "Reach IG": "number", "Likes IG": "number", "Commentaires IG": "number", "Partages IG": "number"}
+        database = self.client.databases.retrieve(database_id=self.settings.notion_programme_content_db)
+        existing = database.get("properties", {})
+        conflicts = [name for name, expected in stats.items() if name in existing and existing[name].get("type") != expected]
+        if conflicts:
+            raise RuntimeError(f"Notion schema type conflict for performance properties: {', '.join(conflicts)}")
+        missing = {name: {kind: {}} for name, kind in stats.items() if name not in existing}
+        if missing:
+            self.client.databases.update(database_id=self.settings.notion_programme_content_db, properties=missing)
+
+    def _all_pages(self) -> list[dict[str, Any]]:
+        pages: list[dict[str, Any]] = []
+        cursor = None
+        while True:
+            kwargs = {"database_id": self.settings.notion_programme_content_db, "page_size": 100}
+            if cursor:
+                kwargs["start_cursor"] = cursor
+            response = self.client.databases.query(**kwargs)
+            pages.extend(response.get("results", []))
+            if not response.get("has_more"):
+                return pages
+            cursor = response.get("next_cursor")
+
+    @staticmethod
+    def _match_published_page(reel: dict[str, Any], pages: list[dict[str, Any]], used_page_ids: set[str]) -> Optional[dict[str, Any]]:
+        reel_url = (reel.get("url") or "").rstrip("/")
+        for page in pages:
+            if page.get("id") in used_page_ids:
+                continue
+            urls = [prop.get("url", "").rstrip("/") for prop in page.get("properties", {}).values() if prop.get("type") == "url"]
+            if reel_url and reel_url in urls:
+                return page
+        reel_date = _iso_date(reel.get("timestamp") or reel.get("timestamp_raw") or reel.get("date") or "")
+        if not reel_date:
+            return None
+        candidates = []
+        for page in pages:
+            if page.get("id") in used_page_ids:
+                continue
+            props = page.get("properties", {})
+            status = ((props.get("IG Status", {}).get("select") or {}).get("name") or "").lower()
+            planned = _iso_date(((props.get("Date of Publish", {}).get("date") or {}).get("start") or ""))
+            if status != "published" or not planned:
+                continue
+            delta = (reel_date - planned).days
+            if -3 <= delta <= 30:
+                candidates.append((abs(delta), page))
+        return min(candidates, key=lambda item: item[0])[1] if candidates else None
+
     def ensure_v2_properties(self) -> None:
         self._require()
         database = self.client.databases.retrieve(database_id=self.settings.notion_programme_content_db)
@@ -111,6 +196,13 @@ class NotionEditorialCalendar:
 
 def _rich(value: str):
     return [{"text": {"content": value[:1800]}}] if value else []
+
+
+def _iso_date(value: str) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
 
 
 def _text(prop: dict) -> str:

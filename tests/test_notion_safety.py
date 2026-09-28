@@ -63,3 +63,35 @@ def test_recent_content_paginates_all_editorial_rows():
     calendar = NotionEditorialCalendar(Settings(notion_api_key="key", notion_programme_content_db="db"))
     calendar.client = FakeClient()
     assert [item["title"] for item in calendar.recent_content()] == ["first", "second"]
+
+
+def test_performance_sync_updates_only_a_matched_published_calendar_page():
+    stats = {name: {"type": "number"} for name in ("Vues IG", "Saves IG", "Reach IG", "Likes IG", "Commentaires IG", "Partages IG")}
+    page = {
+        "id": "published-page",
+        "properties": {
+            **stats,
+            "IG Status": {"type": "select", "select": {"name": "Published"}},
+            "Date of Publish": {"type": "date", "date": {"start": "2026-09-20"}},
+            "URL Reel": {"type": "url", "url": "https://www.instagram.com/reel/ours/"},
+        },
+    }
+
+    class Databases:
+        def retrieve(self, **_): return {"properties": {**stats}}
+        def query(self, **_): return {"results": [page], "has_more": False}
+        def update(self, **_): raise AssertionError("all performance fields already exist")
+
+    class Pages:
+        def __init__(self): self.updates = []
+        def update(self, **kwargs): self.updates.append(kwargs)
+
+    class FakeClient:
+        databases = Databases()
+        pages = Pages()
+
+    calendar = NotionEditorialCalendar(Settings(notion_api_key="key", notion_programme_content_db="db"))
+    calendar.client = FakeClient()
+    result = calendar.sync_published_metrics([{"url": "https://www.instagram.com/reel/ours/", "views": 1200, "likes": 30, "comments": 2}], "apify")
+    assert result == {"source": "apify", "reels_observed": 1, "updated": 1, "skipped": 0}
+    assert FakeClient.pages.updates[0]["properties"] == {"Vues IG": {"number": 1200}, "Likes IG": {"number": 30}, "Commentaires IG": {"number": 2}}
