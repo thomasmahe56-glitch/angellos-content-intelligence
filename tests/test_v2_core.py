@@ -202,6 +202,24 @@ def test_cost_report_only_claims_total_when_all_used_services_have_rates():
     assert report.costs["complete"] is True
 
 
+def test_historical_signals_prefer_durable_notion_ledger_over_local_cache():
+    from content_agent.runner import _historical_signals
+    durable = {
+        "performance_patterns": {
+            "historical_signals": {
+                "successful_hook_patterns": ["durable hook"],
+                "successful_formats": ["talking head"],
+                "successful_topics": ["qualification"],
+                "weak_patterns": ["durable weak"],
+                "notes": ["durable note"],
+            }
+        }
+    }
+    signals = _historical_signals(Settings(), durable)
+    assert signals["successful_hook_patterns"] == ["durable hook"]
+    assert signals["notes"] == ["durable note"]
+
+
 def test_luna_omits_temperature_unless_explicitly_configured(monkeypatch):
     captured = {}
 

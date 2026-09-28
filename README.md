@@ -18,6 +18,11 @@ contract:
 python -m content_agent scout --once --hermes
 ```
 
+When calling the deployed service instead, use its bearer-protected V2 routes:
+`POST /agent/scout`, `POST /agent/analyze`, and `POST /agent/sync-performance`.
+The latter persists learning signals to the dedicated Notion state page; it does
+not rely on Railway disk.
+
 ## Setup
 
 Install dependencies and Playwright Chromium:

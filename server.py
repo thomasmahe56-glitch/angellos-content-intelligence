@@ -118,6 +118,15 @@ async def agent_analyze(request: Request):
     result = await analyze_reel_url(source_url, dry_run=bool(body.get("dry_run", False)))
     return JSONResponse(result, status_code=200 if result.get("status") == "completed" else 207)
 
+
+@app.post("/agent/sync-performance")
+async def agent_sync_performance(request: Request):
+    """Refresh published-content learning through the protected V2 boundary."""
+    _require_agent_token(request)
+    from content_agent.runner import sync_performance
+    result = await sync_performance()
+    return JSONResponse(result, status_code=200 if result.get("status") == "completed" else 207)
+
 _cors_origins = [
     "http://localhost:8080",
     "http://localhost:5173",

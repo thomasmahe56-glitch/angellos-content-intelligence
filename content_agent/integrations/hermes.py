@@ -34,4 +34,5 @@ def event_from_report(report: dict[str, Any]) -> dict[str, Any]:
         },
         "created_items": report.get("created_items", []),
         "errors": report.get("errors", []),
+        "costs": report.get("costs", {}),
     }

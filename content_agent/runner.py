@@ -56,7 +56,7 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
     except Exception as exc:
         report.status, report.errors = "configuration_error", [str(exc)]
         return report.finish()
-    historical = _historical_signals()
+    historical = _historical_signals(cfg, state)
     try:
         requested_reels = cfg.discovery_max_reels_per_run if max_reels is None else max(0, max_reels)
         candidates = await browser.discover(min(requested_reels, cfg.discovery_max_reels_per_run))
@@ -250,7 +250,7 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
             except Exception as exc:
                 report.errors.append(f"apify_metrics_fallback_failed: {exc}")
         candidate.viral_ratio = viral_ratio(candidate.views, candidate.followers)
-        context, recent, historical = fetch_angellos_context(), calendar.recent_content(), _historical_signals()
+        context, recent, historical = fetch_angellos_context(), calendar.recent_content(), _historical_signals(cfg)
         reel = await download(candidate.source_url)
         report.videos_downloaded += 1
         try:
@@ -303,7 +303,24 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
             pass
 
 
-def _historical_signals() -> dict:
+def _historical_signals(cfg: Settings = settings, state: Optional[dict] = None) -> dict:
+    """Load durable learning first; local JSON is only a development cache."""
+    if state is None:
+        try:
+            state = StateStore(cfg).load(strict=False)
+        except Exception:
+            state = {}
+    learned = (state or {}).get("performance_patterns")
+    if isinstance(learned, dict):
+        signals = learned.get("historical_signals", learned)
+        if isinstance(signals, dict):
+            return {
+                "successful_hook_patterns": signals.get("successful_hook_patterns", []),
+                "successful_formats": signals.get("successful_formats", []),
+                "successful_topics": signals.get("successful_topics", []),
+                "weak_patterns": signals.get("weak_patterns", []),
+                "notes": signals.get("notes", learned.get("insights", [])),
+            }
     path = Path("performance_patterns.json")
     if not path.exists():
         return {"successful_hook_patterns": [], "successful_formats": [], "successful_topics": [], "weak_patterns": [], "notes": []}
@@ -368,17 +385,53 @@ def _cost_report_without_luna(report: RunReport, cfg: Settings, apify_cost_usd: 
     return {**values, "total_usd": total, "currency": "USD", "complete": total is not None, "luna_input_tokens": 0, "luna_output_tokens": 0, "gemini_videos": report.videos_analyzed}
 
 
-async def sync_performance() -> dict:
+async def sync_performance(cfg: Settings = settings) -> dict:
     """Refresh @angellos.ai stats then let Luna write explicitly non-deterministic signals."""
     from stats.notion_sync import sync_instagram_stats
     from content_agent.intelligence.performance_learning import analyze_performance_signals, save_patterns
-    stats_result = await sync_instagram_stats()
-    calendar = NotionEditorialCalendar(settings)
-    rows = calendar.performance_rows()
-    client = LunaClient(settings)
-    patterns = await analyze_performance_signals(client, rows)
+    state_store = StateStore(cfg)
+    if not state_store.durable and not cfg.allow_ephemeral_state:
+        return {"status": "configuration_error", "errors": ["NOTION_CONTENT_AGENT_STATE_PAGE_ID is required for durable performance learning"], "costs": _unknown_cost_report()}
+    try:
+        state = state_store.load(strict=state_store.durable and not cfg.allow_ephemeral_state)
+    except Exception as exc:
+        return {"status": "partial_failure", "errors": [f"durable_state_unavailable: {exc}"], "costs": _unknown_cost_report()}
+    try:
+        stats_result = await sync_instagram_stats()
+        calendar = NotionEditorialCalendar(cfg)
+        rows = calendar.performance_rows()
+    except Exception as exc:
+        return {"status": "partial_failure", "errors": [f"performance_data_sync_failed: {exc}"], "costs": _unknown_cost_report()}
+    client = LunaClient(cfg)
+    if not rows:
+        report = RunReport()
+        _set_cost_report(report, cfg, client, 0.0, True)
+        return {"status": "completed", "stats_sync": stats_result, "performance_rows": 0, "ai_calls": {"luna": 0}, "patterns_updated": False, "costs": report.costs}
+    try:
+        patterns = await analyze_performance_signals(client, rows)
+    except Exception as exc:
+        report = RunReport()
+        report.status, report.errors = "partial_failure", [f"performance_learning_failed: {exc}"]
+        report.ai_calls["luna"] = client.calls
+        _set_cost_report(report, cfg, client, 0.0, True)
+        return report.finish()
     save_patterns(patterns)
-    return {"status": "completed", "stats_sync": stats_result, "performance_rows": len(rows), "ai_calls": {"luna": client.calls}, "patterns_updated": True}
+    # Railway disk is ephemeral; the Notion ledger is the authoritative memory
+    # injected into every following scout. Keep the JSON file only as a local
+    # developer convenience and recovery aid.
+    state["performance_patterns"] = patterns
+    try:
+        state_store.save(state)
+    except Exception as exc:
+        report = RunReport()
+        report.status, report.errors = "partial_failure", [f"state_persistence_failed: {exc}"]
+        report.ai_calls["luna"] = client.calls
+        _set_cost_report(report, cfg, client, 0.0, True)
+        return report.finish()
+    report = RunReport()
+    report.ai_calls["luna"] = client.calls
+    _set_cost_report(report, cfg, client, 0.0, True)
+    return {"status": "completed", "stats_sync": stats_result, "performance_rows": len(rows), "ai_calls": {"luna": client.calls}, "patterns_updated": True, "costs": report.costs}
 
 
 def health(cfg: Settings = settings) -> dict:
