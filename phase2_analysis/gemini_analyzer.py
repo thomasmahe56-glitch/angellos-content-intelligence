@@ -120,6 +120,12 @@ def _should_try_next_model(exc: Exception) -> bool:
     )
 
 
+def _is_daily_quota_exhausted(exc: Exception) -> bool:
+    """A daily project quota cannot be fixed by trying another model."""
+    msg = str(exc).lower()
+    return "perdayperproject" in msg or "quota_value: 20" in msg or "quota_value: 5" in msg
+
+
 def upload_video(local_path: str) -> genai.types.File:
     if not GEMINI_API_KEY:
         raise EnvironmentError("GEMINI_API_KEY is not set. Add it to Railway environment variables.")
@@ -270,6 +276,8 @@ def analyze_reel(local_path: str, caption_originale: Optional[str] = None) -> di
                         f"trying next. Detail: {exc}"
                     )
                     last_error = exc
+                    if _is_daily_quota_exhausted(exc):
+                        break
                     continue
                 raise  # non-transient error: propagate immediately
 
