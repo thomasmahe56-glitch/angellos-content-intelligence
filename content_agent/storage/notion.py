@@ -131,7 +131,7 @@ class NotionEditorialCalendar:
         for page in pages:
             if page.get("id") in used_page_ids:
                 continue
-            urls = [prop.get("url", "").rstrip("/") for prop in page.get("properties", {}).values() if prop.get("type") == "url"]
+            urls = [str(prop.get("url") or "").rstrip("/") for prop in page.get("properties", {}).values() if prop.get("type") == "url"]
             if reel_url and reel_url in urls:
                 return page
         reel_date = _iso_date(reel.get("timestamp") or reel.get("timestamp_raw") or reel.get("date") or "")

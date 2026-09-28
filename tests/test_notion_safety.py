@@ -74,6 +74,7 @@ def test_performance_sync_updates_only_a_matched_published_calendar_page():
             "IG Status": {"type": "select", "select": {"name": "Published"}},
             "Date of Publish": {"type": "date", "date": {"start": "2026-09-20"}},
             "URL Reel": {"type": "url", "url": "https://www.instagram.com/reel/ours/"},
+            "Optional URL": {"type": "url", "url": None},
         },
     }
 
