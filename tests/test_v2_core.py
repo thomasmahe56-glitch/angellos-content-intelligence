@@ -1,6 +1,8 @@
 from content_agent.content.scheduler import next_editorial_slot
 from content_agent.discovery.dedupe import is_duplicate
 from content_agent.discovery.metrics import parse_compact_number, viral_ratio
+from content_agent.discovery.outlier import build_baseline, score_candidate
+from datetime import datetime, timezone
 from content_agent.intelligence.luna_client import LunaError, parse_json
 from content_agent.models.schemas import Candidate
 from content_agent.storage.state import StateStore
@@ -33,6 +35,21 @@ def test_reel_creator_prefers_detail_creator_link_over_own_navigation_link():
 
 def test_viral_ratio():
     assert viral_ratio(100_000, 20_000) == 5
+
+
+def test_creator_relative_outlier_can_qualify_without_follower_count():
+    baseline = build_baseline([
+        {"views": 10_000, "likes": 300, "comments": 20, "source_published_at": "2026-09-20"},
+        {"views": 12_000, "likes": 360, "comments": 22, "source_published_at": "2026-09-19"},
+        {"views": 11_000, "likes": 330, "comments": 21, "source_published_at": "2026-09-18"},
+        {"views": 9_000, "likes": 270, "comments": 18, "source_published_at": "2026-09-17"},
+        {"views": 10_500, "likes": 315, "comments": 20, "source_published_at": "2026-09-16"},
+    ])
+    candidate = Candidate(source_url="https://www.instagram.com/reel/outlier/", views=32_000, likes=1_600, comments=120, source_published_at="2026-09-27")
+    score = score_candidate(candidate, baseline, now=datetime(2026, 9, 28, tzinfo=timezone.utc))
+    assert score["view_outlier_ratio"] > 2.5
+    assert score["outlier_score"] >= 60
+    assert score["outlier_level"] in {"strong_outlier", "priority"}
 
 
 def test_dedupe_by_shortcode():
@@ -183,11 +200,12 @@ def test_apify_metric_helpers_only_accept_explicit_numeric_values():
     assert _creator_username({"owner": {"username": "creator"}}) == "creator"
 
 
-def test_qualified_rank_prefers_virality_then_transferability_then_freshness():
-    older = Candidate(source_url="https://www.instagram.com/reel/old/", viral_ratio=5, discovered_at="2026-01-01T00:00:00+00:00")
-    stronger_fit = Candidate(source_url="https://www.instagram.com/reel/fit/", viral_ratio=5, discovered_at="2026-01-02T00:00:00+00:00")
-    more_viral = Candidate(source_url="https://www.instagram.com/reel/viral/", viral_ratio=6)
-    assert _qualified_rank((more_viral, {"confidence": 0})) > _qualified_rank((stronger_fit, {"confidence": 1}))
+def test_qualified_rank_prefers_creator_outlier_then_transferability_then_freshness():
+    older = Candidate(source_url="https://www.instagram.com/reel/old/", viral_ratio=5, outlier_score=60, discovered_at="2026-01-01T00:00:00+00:00")
+    stronger_fit = Candidate(source_url="https://www.instagram.com/reel/fit/", viral_ratio=5, outlier_score=60, discovered_at="2026-01-02T00:00:00+00:00")
+    follower_outlier = Candidate(source_url="https://www.instagram.com/reel/follower/", viral_ratio=8, outlier_score=0)
+    creator_outlier = Candidate(source_url="https://www.instagram.com/reel/creator/", viral_ratio=1, outlier_score=70)
+    assert _qualified_rank((creator_outlier, {"confidence": 0})) > _qualified_rank((follower_outlier, {"confidence": 1}))
     assert _qualified_rank((stronger_fit, {"confidence": 1})) > _qualified_rank((older, {"confidence": 0.5}))
 
 

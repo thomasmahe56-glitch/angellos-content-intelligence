@@ -140,6 +140,52 @@ class InstagramBrowser:
                 await browser.close()
         return candidate
 
+    async def creator_recent_reels(self, creator: str, limit: int, *, exclude_shortcode: str = "") -> list[dict]:
+        """Observe a small creator baseline through Instagram, never Apify.
+
+        This runs only for preselected candidates and its output is cached by the
+        runner. Values remain absent when Instagram does not expose them.
+        """
+        if not creator or limit <= 0:
+            return []
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await self._new_context(browser)
+            page = await context.new_page()
+            try:
+                await page.goto(f"https://www.instagram.com/{creator}/reels/", wait_until="domcontentloaded", timeout=45_000)
+                await self._raise_if_challenge(page)
+                found: dict[str, Candidate] = {}
+                for _ in range(min(self.settings.scout_scroll_limit, 8)):
+                    hrefs = await page.eval_on_selector_all(
+                        'a[href*="/reel/"], a[href*="/p/"]',
+                        "els => [...new Set(els.map(e => e.href))]",
+                    )
+                    for href in hrefs:
+                        candidate = self._candidate_from_url(href, "creator_baseline")
+                        if candidate and candidate.shortcode != exclude_shortcode:
+                            found.setdefault(candidate.shortcode, candidate)
+                    if len(found) >= limit:
+                        break
+                    await page.mouse.wheel(0, 1400)
+                    await asyncio.sleep(0.8)
+                observations = []
+                for candidate in list(found.values())[:limit]:
+                    await page.goto(candidate.source_url, wait_until="domcontentloaded", timeout=45_000)
+                    await self._raise_if_challenge(page)
+                    text = await page.locator("body").inner_text(timeout=10_000)
+                    description = await page.locator('meta[property="og:description"]').get_attribute("content") or ""
+                    observations.append({
+                        "shortcode": candidate.shortcode,
+                        "views": self._metric_after(text, "views"),
+                        "likes": self._metric_after(text, "likes"),
+                        "comments": self._metric_after(text, "comments"),
+                        "source_published_at": self._published_date(description),
+                    })
+                return observations
+            finally:
+                await browser.close()
+
     @staticmethod
     def _candidate_from_url(href: str, method: str) -> Optional[Candidate]:
         match = re.search(r"/(reel|reels|p)/([A-Za-z0-9_-]+)", href)

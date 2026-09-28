@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -87,7 +88,9 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
                 StateStore.mark(state, candidate, "rejected_own_account")
                 continue
             report.new_reels += 1
-            if candidate.views is None or candidate.followers is None:
+            # Followers are no longer required: absolute engagement and the
+            # creator-relative baseline can qualify a Reel without Apify.
+            if candidate.views is None:
                 missing_metrics.append(candidate)
             else:
                 metric_candidates.append(candidate)
@@ -119,22 +122,75 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
             # unavailable. Candidates without verifiable metrics are safely
             # retained as insufficient_metrics below.
             report.errors.append(f"apify_metrics_fallback_failed: {exc}")
-    new = []
+    preselected = []
     for candidate in [*metric_candidates, *missing_metrics]:
         candidate.viral_ratio = viral_ratio(candidate.views, candidate.followers)
-        if candidate.viral_ratio is None:
+        if candidate.views is None:
             StateStore.mark(state, candidate, "insufficient_metrics")
-        elif candidate.viral_ratio < cfg.viral_ratio_min:
-            StateStore.mark(state, candidate, "rejected_ratio")
-            report.rejected_ratio += 1
         else:
-            StateStore.mark(state, candidate, "discovered")
+            has_fast_signal = (
+                candidate.views >= cfg.outlier_preselect_min_views
+                or (candidate.likes or 0) >= cfg.outlier_preselect_min_likes
+                or (candidate.comments or 0) >= cfg.outlier_preselect_min_comments
+                or (candidate.viral_ratio or 0) >= cfg.viral_ratio_min
+            )
+            if has_fast_signal:
+                preselected.append(candidate)
+            else:
+                StateStore.mark(state, candidate, "rejected_low_signal")
+                report.rejected_ratio += 1
+    new = []
+    baseline_attempts = 0
+    for candidate in sorted(preselected, key=lambda item: (item.views or 0, item.likes or 0, item.comments or 0), reverse=True):
+        if time.monotonic() >= deadline:
+            report.status = "partial_failure"
+            report.errors.append("run_timeout_reached")
+            break
+        baseline = None
+        if baseline_attempts < cfg.outlier_baselines_max_per_run:
+            try:
+                baseline, fetched = await _creator_baseline(browser, state, candidate, cfg)
+                baseline_attempts += int(fetched)
+            except InstagramHumanActionRequired as exc:
+                report.human_action_required, report.human_action_reason = True, str(exc)
+                break
+            except Exception as exc:
+                report.errors.append(f"creator_baseline_failed:{candidate.creator_username}:{exc}")
+        signals = _apply_outlier_signals(candidate, baseline)
+        absolute_signal = candidate.views >= cfg.outlier_absolute_min_views and (
+            (candidate.likes or 0) >= cfg.outlier_absolute_min_likes
+            or (candidate.comments or 0) >= cfg.outlier_absolute_min_comments
+        )
+        passed = (
+            (candidate.outlier_score or 0) >= cfg.outlier_score_min
+            or (candidate.view_outlier_ratio or 0) >= 2.5
+            or (candidate.viral_ratio or 0) >= cfg.viral_ratio_min
+            or absolute_signal
+        )
+        if passed:
+            StateStore.mark(state, candidate, "discovered", outlier=signals)
             new.append(candidate)
             report.viral_candidates += 1
+        else:
+            StateStore.mark(state, candidate, "rejected_outlier", outlier=signals)
+            report.rejected_ratio += 1
+    if report.human_action_required:
+        try:
+            state_store.save(state)
+        except Exception as exc:
+            report.errors.append(f"state_persistence_failed: {exc}")
+        report.status = "human_action_required"
+        return report.finish()
     luna = LunaClient(cfg)
-    event(logger, "VIRAL filtering complete", viral_candidates=report.viral_candidates, rejected_ratio=report.rejected_ratio)
+    event(logger, "OUTLIER filtering complete", outlier_candidates=report.viral_candidates, rejected=report.rejected_ratio)
     qualified = []
-    for candidate in sorted(new, key=lambda x: x.viral_ratio or 0, reverse=True)[:cfg.qualified_max_per_run]:
+    # Spend Luna calls on the creator-relative outliers first. Follower-normalized
+    # views are only a late tie-breaker, never the primary gate.
+    for candidate in sorted(
+        new,
+        key=lambda x: (x.outlier_score or 0, x.view_outlier_ratio or 0, x.viral_ratio or 0),
+        reverse=True,
+    )[:cfg.qualified_max_per_run]:
         if time.monotonic() >= deadline:
             report.status = "partial_failure"
             report.errors.append("run_timeout_reached")
@@ -316,6 +372,42 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
             pass
 
 
+async def _creator_baseline(browser: InstagramBrowser, state: dict, candidate, cfg: Settings):
+    """Read a cached per-creator median or observe it once through Instagram."""
+    from content_agent.discovery.outlier import build_baseline
+
+    creator = candidate.creator_username.lower().lstrip("@")
+    cache = state.setdefault("creator_baselines", {})
+    cached = cache.get(creator, {})
+    fetched_at = cached.get("fetched_at", "")
+    try:
+        valid = fetched_at and datetime.fromisoformat(fetched_at) > datetime.now(timezone.utc) - timedelta(hours=cfg.outlier_baseline_ttl_hours)
+    except ValueError:
+        valid = False
+    if valid and isinstance(cached.get("baseline"), dict):
+        return cached["baseline"], False
+    reels = await browser.creator_recent_reels(creator, cfg.outlier_baseline_reels, exclude_shortcode=candidate.shortcode)
+    baseline = build_baseline(reels)
+    cache[creator] = {"fetched_at": datetime.now(timezone.utc).isoformat(), "baseline": baseline, "reels": reels}
+    return baseline, True
+
+
+def _apply_outlier_signals(candidate, baseline: Optional[dict]) -> dict:
+    from content_agent.discovery.outlier import score_candidate
+
+    signals = score_candidate(candidate, baseline or {}) if baseline and baseline.get("sample_size", 0) >= 5 else {
+        "outlier_score": 0.0,
+        "view_outlier_ratio": None,
+        "velocity_outlier_ratio": None,
+        "like_rate_outlier_ratio": None,
+        "comment_rate_outlier_ratio": None,
+        "outlier_level": "insufficient_creator_baseline",
+    }
+    for key, value in signals.items():
+        setattr(candidate, key, value)
+    return signals
+
+
 def _historical_signals(cfg: Settings = settings, state: Optional[dict] = None) -> dict:
     """Load durable learning first; local JSON is only a development cache."""
     if state is None:
@@ -349,8 +441,10 @@ def _historical_signals(cfg: Settings = settings, state: Optional[dict] = None) 
 def _qualified_rank(item):
     candidate, relevance = item
     return (
-        candidate.viral_ratio or 0,
+        candidate.outlier_score or 0,
+        candidate.view_outlier_ratio or 0,
         relevance.get("confidence", 0),
+        candidate.viral_ratio or 0,
         candidate.source_published_at or candidate.discovered_at,
     )
 

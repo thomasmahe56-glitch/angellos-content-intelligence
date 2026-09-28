@@ -47,6 +47,17 @@ INSTAGRAM_COOKIES_FILE=/data/instagram-cookies.txt
 DREAM100_ACCOUNTS=creator_one,creator_two
 INSTAGRAM_SEED_ACCOUNTS=creator_three
 VIRAL_RATIO_MIN=4.0
+# Creator-relative outlier detection. Followers remain a bonus, not a gate.
+OUTLIER_SCORE_MIN=60
+OUTLIER_BASELINE_REELS=12
+OUTLIER_BASELINE_TTL_HOURS=72
+OUTLIER_BASELINES_MAX_PER_RUN=5
+OUTLIER_PRESELECT_MIN_VIEWS=10000
+OUTLIER_PRESELECT_MIN_LIKES=250
+OUTLIER_PRESELECT_MIN_COMMENTS=15
+OUTLIER_ABSOLUTE_MIN_VIEWS=50000
+OUTLIER_ABSOLUTE_MIN_LIKES=1000
+OUTLIER_ABSOLUTE_MIN_COMMENTS=75
 DISCOVERY_MAX_REELS_PER_RUN=100
 QUALIFIED_MAX_PER_RUN=5
 ANALYZE_MAX_PER_RUN=5
@@ -74,6 +85,16 @@ run charge when available; configure the Luna and Gemini token rates above to
 complete the total. `GEMINI_ANALYSIS_USD_PER_VIDEO` is a legacy fallback; token
 usage is preferred because video duration changes the charge. The report never
 invents a provider price.
+
+## How a Reel is selected
+
+The primary signal is now a transparent creator-relative outlier score out of
+100: views against the creator's median recent Reel, then velocity, like rate,
+comment rate, freshness, and finally views/followers as a small bonus. For each
+preselected source, the agent observes up to 12 recent Reels from that creator,
+caches their medians in the durable Notion state for 72 hours, and only sends
+strong outliers to the paid relevance and video-analysis stages. This baseline
+collection uses the authenticated Instagram browser; it does not call Apify.
 
 `NOTION_CONTENT_AGENT_STATE_PAGE_ID` must be a private, dedicated Notion page shared
 with the integration. It keeps compact candidate state, follower cache and dedupe

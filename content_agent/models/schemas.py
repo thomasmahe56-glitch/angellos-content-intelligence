@@ -22,6 +22,12 @@ class Candidate:
     media_is_video: Optional[bool] = None
     status: str = "discovered"
     viral_ratio: Optional[float] = None
+    outlier_score: Optional[float] = None
+    view_outlier_ratio: Optional[float] = None
+    velocity_outlier_ratio: Optional[float] = None
+    like_rate_outlier_ratio: Optional[float] = None
+    comment_rate_outlier_ratio: Optional[float] = None
+    outlier_level: str = ""
 
     @property
     def key(self) -> str:
