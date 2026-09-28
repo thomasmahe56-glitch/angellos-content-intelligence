@@ -288,6 +288,7 @@ async def analyze_reel_url(
     *,
     dry_run: bool = False,
     observed_metrics: Optional[dict] = None,
+    run_id: str = "",
     cfg: Settings = settings,
 ) -> dict:
     """Analyze one supplied Reel through Gemini→Luna safety gates.
@@ -337,6 +338,7 @@ async def analyze_reel_url(
                 followers=observed_int("followers"),
                 caption_preview=str(observed_metrics.get("caption_preview") or ""),
                 discovery_method="computer_use_visible_metrics",
+                run_id=run_id.strip()[:128],
             )
         else:
             browser = InstagramBrowser(cfg)
@@ -345,7 +347,7 @@ async def analyze_reel_url(
             except InstagramHumanActionRequired as exc:
                 report.status, report.human_action_required, report.human_action_reason = "human_action_required", True, str(exc)
                 return report.finish()
-            candidate = Candidate(source_url=source_url, shortcode=match.group(1), discovery_method="manual_url")
+            candidate = Candidate(source_url=source_url, shortcode=match.group(1), discovery_method="manual_url", run_id=run_id.strip()[:128])
     except ValueError as exc:
         return {"status": "configuration_error", "error": str(exc)}
 
@@ -405,7 +407,7 @@ async def analyze_reel_url(
         notion_url = calendar.create(candidate, gemini, adaptation, dry_run=dry_run)
         if not dry_run:
             report.content_ideas_created = 1
-            report.created_items.append({"title": adaptation["internal_title"], "notion_url": notion_url, "viral_ratio": candidate.viral_ratio})
+            report.created_items.append({"title": adaptation["internal_title"], "notion_url": notion_url, "viral_ratio": candidate.viral_ratio, "run_id": candidate.run_id})
         _set_cost_report(report, cfg, luna, apify_cost_usd, apify_cost_known)
         return report.finish()
     except Exception as exc:

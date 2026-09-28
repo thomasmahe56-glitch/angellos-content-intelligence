@@ -119,6 +119,7 @@ async def agent_analyze(request: Request):
         source_url,
         dry_run=bool(body.get("dry_run", False)),
         observed_metrics=body.get("observed_metrics"),
+        run_id=str(body.get("run_id") or ""),
     )
     return JSONResponse(result, status_code=200 if result.get("status") == "completed" else 207)
 

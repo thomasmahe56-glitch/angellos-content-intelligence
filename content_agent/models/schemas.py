@@ -18,6 +18,10 @@ class Candidate:
     caption_preview: str = ""
     discovered_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     discovery_method: str = ""
+    # One identifier is generated for each supervised or production cycle.
+    # It lets the scheduler prove that it is only handing that cycle's new
+    # ideas to ARIA, never the historical editorial backlog.
+    run_id: str = ""
     thumbnail_url: str = ""
     media_is_video: Optional[bool] = None
     status: str = "discovered"
