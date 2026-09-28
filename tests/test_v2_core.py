@@ -9,7 +9,7 @@ import asyncio
 from content_agent.runner import analyze_reel_url
 from content_agent.discovery.instagram_browser import InstagramBrowser
 from content_agent.config import is_configured
-from content_agent.discovery.apify_metrics import _cost_usd, _number, _shortcode
+from content_agent.discovery.apify_metrics import _cost_usd, _creator_username, _number, _shortcode
 from content_agent.runner import _qualified_rank, _set_cost_report
 from content_agent.models.schemas import RunReport
 
@@ -159,9 +159,11 @@ def test_apify_metric_helpers_only_accept_explicit_numeric_values():
     assert _shortcode("https://www.instagram.com/reel/abc-12/") == "abc-12"
     assert _shortcode("abc-12") == "abc-12"
     assert _number({"videoViewCount": 1200}, "videoViewCount") == 1200
-    assert _number({"videoViewCount": "1200"}, "videoViewCount") is None
+    assert _number({"videoViewCount": "1200"}, "videoViewCount") == 1200
+    assert _number({"videoViewCount": "12.5K"}, "videoViewCount") == 12_500
     assert _cost_usd({"usageTotalUsd": 0.12}) == 0.12
     assert _cost_usd({}) is None
+    assert _creator_username({"owner": {"username": "creator"}}) == "creator"
 
 
 def test_qualified_rank_prefers_virality_then_transferability_then_freshness():

@@ -9,6 +9,7 @@ from typing import Iterable, Optional
 import httpx
 
 from content_agent.models.schemas import Candidate
+from content_agent.discovery.metrics import parse_compact_number
 
 APIFY_BASE = "https://api.apify.com/v2"
 ACTOR_ID = "apify~instagram-scraper"
@@ -33,7 +34,17 @@ def _number(item: dict, *names: str):
         value = item.get(name)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return int(value)
+        if isinstance(value, str) and re.fullmatch(r"\s*[0-9]+(?:[.,][0-9]+)?\s*[KMkm]?\s*", value):
+            return parse_compact_number(value)
     return None
+
+
+def _creator_username(item: dict) -> str:
+    owner = item.get("owner") if isinstance(item.get("owner"), dict) else {}
+    for value in (item.get("ownerUsername"), item.get("owner_username"), owner.get("username"), owner.get("userName")):
+        if isinstance(value, str) and value.strip():
+            return value.strip().lstrip("@")
+    return ""
 
 
 def _cost_usd(run: dict) -> Optional[float]:
@@ -86,12 +97,13 @@ async def enrich_reel_metrics(candidates: Iterable[Candidate], api_key: str, lim
             continue
         views = _number(item, "videoViewCount", "videoPlayCount", "playCount", "viewsCount")
         owner = item.get("owner") if isinstance(item.get("owner"), dict) else {}
-        followers = _number(item, "ownerFollowersCount", "ownerFollowers") or _number(owner, "followersCount", "followers")
+        followers = _number(item, "ownerFollowersCount", "ownerFollowers", "ownerFollowersCount") or _number(owner, "followersCount", "followers", "follower_count", "followedByCount")
         if views is not None:
             candidate.views = views
             enriched += 1
         if followers is not None:
             candidate.followers = followers
+        candidate.creator_username = _creator_username(item) or candidate.creator_username
         candidate.likes = candidate.likes if candidate.likes is not None else _number(item, "likesCount")
         candidate.comments = candidate.comments if candidate.comments is not None else _number(item, "commentsCount", "videoCommentCount")
     return ApifyMetricsResult(enriched=enriched, cost_usd=_cost_usd(completed_run), run_id=run_id)

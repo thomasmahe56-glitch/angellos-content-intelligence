@@ -126,9 +126,9 @@ class InstagramBrowser:
                 description = await page.locator('meta[property="og:description"]').get_attribute("content") or ""
                 candidate.caption_preview = description[:1000]
                 candidate.source_published_at = self._published_date(description) or candidate.source_published_at
-                creator = await self._creator(page)
-                candidate.creator_username = creator or candidate.creator_username
-                cached = follower_cache.get(creator or "", {})
+                creator = await self._creator(page) or candidate.creator_username
+                candidate.creator_username = creator
+                cached = follower_cache.get(creator, {})
                 fetched_at = cached.get("fetched_at", "")
                 valid = fetched_at and datetime.fromisoformat(fetched_at) > datetime.now(timezone.utc) - timedelta(hours=self.settings.follower_cache_ttl_hours)
                 if valid:
@@ -170,7 +170,7 @@ class InstagramBrowser:
     async def _creator(page: Page) -> str:
         links = await page.eval_on_selector_all('a[href^="/"]', "els => els.map(e => e.getAttribute('href'))")
         for href in links:
-            if href and re.fullmatch(r"/[A-Za-z0-9._]+/", href) and href.strip("/") not in {"reel", "explore", "accounts"}:
+            if href and re.fullmatch(r"/[A-Za-z0-9._]+/", href) and href.strip("/") not in {"reel", "reels", "explore", "accounts"}:
                 return href.strip("/")
         return ""
 
