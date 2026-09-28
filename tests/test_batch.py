@@ -39,3 +39,11 @@ def test_analyze_batch_rejects_unbounded_size():
     ], run_id="batch-1", cfg=cfg))
     assert result["status"] == "configuration_error"
     assert "at most 1" in result["error"]
+
+
+def test_analyze_batch_requires_cua_metrics():
+    result = asyncio.run(runner.analyze_batch([
+        {"url": "https://www.instagram.com/reel/a/"},
+    ], run_id="batch-1", cfg=Settings()))
+    assert result["status"] == "configuration_error"
+    assert "observed_metrics" in result["error"]

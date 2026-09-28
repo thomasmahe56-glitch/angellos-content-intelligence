@@ -506,6 +506,8 @@ async def analyze_batch(
         url = str(item.get("url") or "").strip()
         if not url:
             return {"status": "configuration_error", "error": "each candidate requires a Reel URL"}
+        if not isinstance(item.get("observed_metrics"), dict):
+            return {"status": "configuration_error", "error": "each batch candidate requires CUA observed_metrics"}
         if url.rstrip("/") in seen:
             continue
         seen.add(url.rstrip("/"))
