@@ -33,9 +33,12 @@ class LunaClient:
         payload = {
             "model": self.settings.openai_content_model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-            "temperature": 0.2,
             "response_format": {"type": "json_schema", "json_schema": {"name": "content_agent", "strict": True, "schema": schema}},
         }
+        # Some frontier models only accept their provider default temperature.
+        # Omit it unless an explicitly compatible override is configured.
+        if self.settings.luna_temperature is not None:
+            payload["temperature"] = self.settings.luna_temperature
         last_error: Optional[Exception] = None
         for attempt in range(3):
             try:

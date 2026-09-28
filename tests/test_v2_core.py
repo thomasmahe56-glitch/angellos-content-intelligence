@@ -12,6 +12,7 @@ from content_agent.config import is_configured
 from content_agent.discovery.apify_metrics import _cost_usd, _creator_username, _number, _shortcode
 from content_agent.runner import _qualified_rank, _set_cost_report
 from content_agent.models.schemas import RunReport
+from content_agent.intelligence.luna_client import LunaClient
 
 
 def test_metric_normalization():
@@ -198,3 +199,24 @@ def test_cost_report_only_claims_total_when_all_used_services_have_rates():
     _set_cost_report(report, cfg, Luna(), apify_cost_usd=0.05, apify_cost_known=True)
     assert report.costs["total_usd"] == 0.45
     assert report.costs["complete"] is True
+
+
+def test_luna_omits_temperature_unless_explicitly_configured(monkeypatch):
+    captured = {}
+
+    class Response:
+        status_code = 200
+        def json(self): return {"choices": [{"message": {"content": "{}"}}], "usage": {}}
+
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_): pass
+        async def post(self, _, **kwargs):
+            captured.update(kwargs["json"])
+            return Response()
+
+    import content_agent.intelligence.luna_client as module
+    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **_: Client())
+    client = LunaClient(Settings(openai_api_key="key"))
+    asyncio.run(client.json("system", "prompt", {"type": "object"}))
+    assert "temperature" not in captured

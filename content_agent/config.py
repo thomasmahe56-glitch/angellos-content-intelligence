@@ -49,6 +49,7 @@ class Settings:
     # than hard-coding a stale rate into operational reports.
     luna_input_usd_per_million_tokens: Optional[float] = _optional_float("LUNA_INPUT_USD_PER_MILLION_TOKENS")
     luna_output_usd_per_million_tokens: Optional[float] = _optional_float("LUNA_OUTPUT_USD_PER_MILLION_TOKENS")
+    luna_temperature: Optional[float] = _optional_float("LUNA_TEMPERATURE")
     gemini_analysis_usd_per_video: Optional[float] = _optional_float("GEMINI_ANALYSIS_USD_PER_VIDEO")
     viral_ratio_min: float = float(os.getenv("VIRAL_RATIO_MIN", "4.0"))
     discovery_max_reels_per_run: int = _int("DISCOVERY_MAX_REELS_PER_RUN", 100)
