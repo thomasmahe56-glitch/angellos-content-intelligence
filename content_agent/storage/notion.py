@@ -6,7 +6,6 @@ from typing import Any, Optional
 from notion_client import Client
 
 from content_agent.config import Settings
-from content_agent.content.scheduler import next_editorial_slot
 from content_agent.models.schemas import Candidate
 
 
@@ -183,13 +182,12 @@ class NotionEditorialCalendar:
         existing = self.source_page_url(candidate.source_url)
         if existing:
             return existing
-        recent = self.recent_content()
-        slot = next_editorial_slot({x["date"] for x in recent if x["date"]}, self.settings.content_publish_days, self.settings.content_items_per_day)
+        # Content Intelligence is an ideas inbox.  Scheduling belongs to ARIA
+        # after a run has finished, so source analysis must never reserve a
+        # publishing slot or attach a date at creation time.
         props = {"Name": {"title": [{"text": {"content": adaptation["internal_title"][:1800]}}]}, "Platform": {"select": {"name": "Instagram"}}, "IG Content Type": {"select": {"name": adaptation.get("ig_content_type") or "Tips"}}, "IG Status": {"select": {"name": "Idea"}}, "Content Type": {"select": {"name": adaptation.get("content_type") or "Hooks"}}, "Source URL": {"url": candidate.source_url}, "Source Creator": {"rich_text": _rich(candidate.creator_username)}, "Source Views": {"number": candidate.views}, "Source Followers": {"number": candidate.followers}, "Viral Ratio": {"number": candidate.viral_ratio}, "Discovery Method": {"rich_text": _rich(candidate.discovery_method)}, "Discovered At": {"date": {"start": candidate.discovered_at}}, "Why Selected": {"rich_text": _rich(adaptation.get("why_selected", ""))}}
         if candidate.source_published_at:
             props["Source Published At"] = {"date": {"start": candidate.source_published_at}}
-        if slot:
-            props["Date of Publish"] = {"date": {"start": slot}}
         page = self.client.pages.create(parent={"database_id": self.settings.notion_programme_content_db}, properties=props, children=_body(candidate, gemini, adaptation))
         return page["url"]
 
