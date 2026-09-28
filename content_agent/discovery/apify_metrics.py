@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Iterable
+from dataclasses import dataclass
+from typing import Iterable, Optional
 
 import httpx
 
@@ -11,6 +12,13 @@ from content_agent.models.schemas import Candidate
 
 APIFY_BASE = "https://api.apify.com/v2"
 ACTOR_ID = "apify~instagram-scraper"
+
+
+@dataclass(frozen=True)
+class ApifyMetricsResult:
+    enriched: int = 0
+    cost_usd: Optional[float] = None
+    run_id: str = ""
 
 
 def _shortcode(value: str) -> str:
@@ -28,7 +36,16 @@ def _number(item: dict, *names: str):
     return None
 
 
-async def enrich_reel_metrics(candidates: Iterable[Candidate], api_key: str, limit: int) -> int:
+def _cost_usd(run: dict) -> Optional[float]:
+    """Read a charge reported by Apify; never infer a price from item count."""
+    for field in ("usageTotalUsd", "totalCostUsd", "chargedAmount"):
+        value = run.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
+
+
+async def enrich_reel_metrics(candidates: Iterable[Candidate], api_key: str, limit: int) -> ApifyMetricsResult:
     """Fill views/followers returned by one capped Apify run; never invent data.
 
     The actor is used only when the browser cannot expose public view counts.
@@ -36,7 +53,7 @@ async def enrich_reel_metrics(candidates: Iterable[Candidate], api_key: str, lim
     """
     selected = [candidate for candidate in candidates if "/reel/" in candidate.source_url][:max(0, limit)]
     if not selected or not api_key:
-        return 0
+        return ApifyMetricsResult()
     wanted = {candidate.shortcode: candidate for candidate in selected}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
@@ -47,10 +64,12 @@ async def enrich_reel_metrics(candidates: Iterable[Candidate], api_key: str, lim
         response.raise_for_status()
         run = response.json()["data"]
         run_id, dataset_id = run["id"], run["defaultDatasetId"]
+        completed_run = run
         for _ in range(60):
             await asyncio.sleep(5)
             status_response = await client.get(f"{APIFY_BASE}/actor-runs/{run_id}", params={"token": api_key})
-            status = status_response.json()["data"]["status"]
+            completed_run = status_response.json()["data"]
+            status = completed_run["status"]
             if status == "SUCCEEDED":
                 break
             if status in {"FAILED", "TIMED-OUT", "ABORTED"}:
@@ -75,4 +94,4 @@ async def enrich_reel_metrics(candidates: Iterable[Candidate], api_key: str, lim
             candidate.followers = followers
         candidate.likes = candidate.likes if candidate.likes is not None else _number(item, "likesCount")
         candidate.comments = candidate.comments if candidate.comments is not None else _number(item, "commentsCount", "videoCommentCount")
-    return enriched
+    return ApifyMetricsResult(enriched=enriched, cost_usd=_cost_usd(completed_run), run_id=run_id)

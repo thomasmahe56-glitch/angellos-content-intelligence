@@ -52,6 +52,7 @@ class RunReport:
     ai_calls: dict[str, int] = field(default_factory=lambda: {"luna": 0, "gemini": 0})
     videos_downloaded: int = 0
     errors: list[str] = field(default_factory=list)
+    costs: dict[str, Any] = field(default_factory=dict)
 
     def finish(self, status: Optional[str] = None) -> dict[str, Any]:
         if status:

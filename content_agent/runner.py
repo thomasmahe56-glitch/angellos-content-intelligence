@@ -24,6 +24,8 @@ from phase2_analysis.notion_context import fetch_angellos_context
 async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = None, max_content: Optional[int] = None, cfg: Settings = settings) -> dict:
     """Run the complete V2 pipeline. Each candidate is isolated by design."""
     report = RunReport()
+    apify_cost_usd = 0.0
+    apify_cost_known = True
     logger = get_logger(cfg.log_format == "json")
     event(logger, "SCOUT started", dry_run=dry_run)
     deadline = time.monotonic() + cfg.run_timeout_seconds
@@ -66,8 +68,10 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
     if cfg.apify_metrics_fallback and cfg.apify_api_key:
         try:
             from content_agent.discovery.apify_metrics import enrich_reel_metrics
-            enriched = await enrich_reel_metrics(candidates, cfg.apify_api_key, cfg.apify_metrics_max_reels)
-            event(logger, "APIFY metric fallback completed", reels_with_views=enriched)
+            apify_result = await enrich_reel_metrics(candidates, cfg.apify_api_key, cfg.apify_metrics_max_reels)
+            apify_cost_usd = apify_result.cost_usd or 0.0
+            apify_cost_known = apify_result.cost_usd is not None
+            event(logger, "APIFY metric fallback completed", reels_with_views=apify_result.enriched)
         except Exception as exc:
             # Browser discovery remains usable if the optional paid fallback is
             # unavailable. Candidates without verifiable metrics are safely
@@ -197,6 +201,7 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
                 except OSError:
                     pass
     report.ai_calls["luna"] = luna.calls
+    _set_cost_report(report, cfg, luna, apify_cost_usd, apify_cost_known)
     try:
         state_store.save(state)
     except Exception as exc:
@@ -283,6 +288,17 @@ def _qualified_rank(item):
         relevance.get("confidence", 0),
         candidate.source_published_at or candidate.discovered_at,
     )
+
+
+def _set_cost_report(report: RunReport, cfg: Settings, luna, apify_cost_usd: float, apify_cost_known: bool) -> None:
+    luna_cost = getattr(luna, "estimated_cost_usd", lambda: None)()
+    gemini_cost = 0.0 if not report.videos_analyzed else (
+        report.videos_analyzed * cfg.gemini_analysis_usd_per_video
+        if cfg.gemini_analysis_usd_per_video is not None else None
+    )
+    values = {"apify_usd": apify_cost_usd if apify_cost_known else None, "luna_usd": luna_cost, "gemini_usd": gemini_cost}
+    total = sum(values.values()) if all(value is not None for value in values.values()) else None
+    report.costs = {**values, "total_usd": total, "currency": "USD", "complete": total is not None}
 
 
 async def sync_performance() -> dict:

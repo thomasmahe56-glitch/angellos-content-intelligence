@@ -20,6 +20,8 @@ class LunaClient:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
 
     def _validate_config(self) -> None:
         if not is_configured(self.settings.openai_api_key) or not is_configured(self.settings.openai_content_model):
@@ -44,6 +46,9 @@ class LunaClient:
                 if response.status_code >= 400:
                     raise LunaError(f"Luna API error {response.status_code}: {response.text[:300]}")
                 data = response.json()
+                usage = data.get("usage", {})
+                self.input_tokens += int(usage.get("prompt_tokens", 0) or 0)
+                self.output_tokens += int(usage.get("completion_tokens", 0) or 0)
                 break
             except (httpx.HTTPError, LunaError) as exc:
                 last_error = exc
@@ -54,6 +59,15 @@ class LunaClient:
             raise LunaError(str(last_error))
         content = data["choices"][0]["message"]["content"]
         return parse_json(content)
+
+    def estimated_cost_usd(self):
+        if not self.calls:
+            return 0.0
+        input_rate = self.settings.luna_input_usd_per_million_tokens
+        output_rate = self.settings.luna_output_usd_per_million_tokens
+        if input_rate is None or output_rate is None:
+            return None
+        return (self.input_tokens * input_rate + self.output_tokens * output_rate) / 1_000_000
 
 
 def parse_json(raw: Union[str, dict]) -> dict[str, Any]:

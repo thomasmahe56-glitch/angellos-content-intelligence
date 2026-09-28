@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,6 +16,11 @@ def _int(name: str, default: int) -> int:
 
 def _bool(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _optional_float(name: str):
+    value = os.getenv(name, "").strip()
+    return float(value) if value else None
 
 
 @dataclass(frozen=True)
@@ -39,6 +45,11 @@ class Settings:
     # incur usage. Enable only after choosing the desired run budget.
     apify_metrics_fallback: bool = _bool("APIFY_METRICS_FALLBACK", False)
     apify_metrics_max_reels: int = _int("APIFY_METRICS_MAX_REELS", 25)
+    # Provider prices evolve. Keep estimates transparent and opt-in rather
+    # than hard-coding a stale rate into operational reports.
+    luna_input_usd_per_million_tokens: Optional[float] = _optional_float("LUNA_INPUT_USD_PER_MILLION_TOKENS")
+    luna_output_usd_per_million_tokens: Optional[float] = _optional_float("LUNA_OUTPUT_USD_PER_MILLION_TOKENS")
+    gemini_analysis_usd_per_video: Optional[float] = _optional_float("GEMINI_ANALYSIS_USD_PER_VIDEO")
     viral_ratio_min: float = float(os.getenv("VIRAL_RATIO_MIN", "4.0"))
     discovery_max_reels_per_run: int = _int("DISCOVERY_MAX_REELS_PER_RUN", 100)
     qualified_max_per_run: int = _int("QUALIFIED_MAX_PER_RUN", 5)

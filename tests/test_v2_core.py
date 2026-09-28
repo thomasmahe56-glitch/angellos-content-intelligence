@@ -9,8 +9,9 @@ import asyncio
 from content_agent.runner import analyze_reel_url
 from content_agent.discovery.instagram_browser import InstagramBrowser
 from content_agent.config import is_configured
-from content_agent.discovery.apify_metrics import _number, _shortcode
-from content_agent.runner import _qualified_rank
+from content_agent.discovery.apify_metrics import _cost_usd, _number, _shortcode
+from content_agent.runner import _qualified_rank, _set_cost_report
+from content_agent.models.schemas import RunReport
 
 
 def test_metric_normalization():
@@ -159,6 +160,8 @@ def test_apify_metric_helpers_only_accept_explicit_numeric_values():
     assert _shortcode("abc-12") == "abc-12"
     assert _number({"videoViewCount": 1200}, "videoViewCount") == 1200
     assert _number({"videoViewCount": "1200"}, "videoViewCount") is None
+    assert _cost_usd({"usageTotalUsd": 0.12}) == 0.12
+    assert _cost_usd({}) is None
 
 
 def test_qualified_rank_prefers_virality_then_transferability_then_freshness():
@@ -167,3 +170,14 @@ def test_qualified_rank_prefers_virality_then_transferability_then_freshness():
     more_viral = Candidate(source_url="https://www.instagram.com/reel/viral/", viral_ratio=6)
     assert _qualified_rank((more_viral, {"confidence": 0})) > _qualified_rank((stronger_fit, {"confidence": 1}))
     assert _qualified_rank((stronger_fit, {"confidence": 1})) > _qualified_rank((older, {"confidence": 0.5}))
+
+
+def test_cost_report_only_claims_total_when_all_used_services_have_rates():
+    class Luna:
+        def estimated_cost_usd(self): return 0.2
+
+    report = RunReport(videos_analyzed=2)
+    cfg = Settings(gemini_analysis_usd_per_video=0.1)
+    _set_cost_report(report, cfg, Luna(), apify_cost_usd=0.05, apify_cost_known=True)
+    assert report.costs["total_usd"] == 0.45
+    assert report.costs["complete"] is True

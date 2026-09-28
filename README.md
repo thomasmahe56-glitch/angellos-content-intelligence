@@ -53,10 +53,17 @@ CONTENT_PUBLISH_DAYS=MON,TUE,WED,THU,FRI
 CONTENT_ITEMS_PER_DAY=1
 DELETE_SOURCE_VIDEO_AFTER_ANALYSIS=true
 CONTENT_AGENT_LOG_FORMAT=json
+LUNA_INPUT_USD_PER_MILLION_TOKENS=
+LUNA_OUTPUT_USD_PER_MILLION_TOKENS=
+GEMINI_ANALYSIS_USD_PER_VIDEO=
 ```
 
 `CONTENT_AGENT_ALLOW_EPHEMERAL_STATE=true` is only for local tests or deliberate
 dry-runs. Never set it in Railway production.
+
+Every scout report includes a `costs` object in USD. Apify reports its actual
+run charge when available; configure the Luna token rates and Gemini per-video
+rate above to complete the total. The report never invents a provider price.
 
 `NOTION_CONTENT_AGENT_STATE_PAGE_ID` must be a private, dedicated Notion page shared
 with the integration. It keeps compact candidate state, follower cache and dedupe
