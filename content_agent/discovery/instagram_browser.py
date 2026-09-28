@@ -123,7 +123,9 @@ class InstagramBrowser:
                 candidate.views = self._metric_after(text, "views") or candidate.views
                 candidate.likes = self._metric_after(text, "likes") or candidate.likes
                 candidate.comments = self._metric_after(text, "comments") or candidate.comments
-                candidate.caption_preview = (await page.locator('meta[property="og:description"]').get_attribute("content") or "")[:1000]
+                description = await page.locator('meta[property="og:description"]').get_attribute("content") or ""
+                candidate.caption_preview = description[:1000]
+                candidate.source_published_at = self._published_date(description) or candidate.source_published_at
                 creator = await self._creator(page)
                 candidate.creator_username = creator or candidate.creator_username
                 cached = follower_cache.get(creator or "", {})
@@ -177,6 +179,17 @@ class InstagramBrowser:
         pattern = rf"([0-9][0-9.,\s]*[KM]?)\s+{label}"
         match = re.search(pattern, text, re.I)
         return parse_compact_number(match.group(1)) if match else None
+
+    @staticmethod
+    def _published_date(description: str) -> str:
+        """Extract Instagram's public English OG date when it is available."""
+        match = re.search(r"\bon ([A-Z][a-z]+ \d{1,2}, \d{4})\b", description)
+        if not match:
+            return ""
+        try:
+            return datetime.strptime(match.group(1), "%B %d, %Y").date().isoformat()
+        except ValueError:
+            return ""
 
     @staticmethod
     async def _raise_if_challenge(page: Page) -> None:

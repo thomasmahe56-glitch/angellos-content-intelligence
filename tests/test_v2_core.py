@@ -148,6 +148,12 @@ def test_candidate_urls_support_reel_and_video_post_routes():
     assert (post.source_url, post.shortcode) == ("https://www.instagram.com/p/xyz/", "xyz")
 
 
+def test_public_og_date_is_normalized_for_freshness_ranking():
+    description = '2,000 likes - creator on September 10, 2026: "caption"'
+    assert InstagramBrowser._published_date(description) == "2026-09-10"
+    assert InstagramBrowser._published_date("no date exposed") == ""
+
+
 def test_apify_metric_helpers_only_accept_explicit_numeric_values():
     assert _shortcode("https://www.instagram.com/reel/abc-12/") == "abc-12"
     assert _shortcode("abc-12") == "abc-12"
