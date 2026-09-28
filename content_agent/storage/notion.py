@@ -154,7 +154,7 @@ class NotionEditorialCalendar:
         self._require()
         database = self.client.databases.retrieve(database_id=self.settings.notion_programme_content_db)
         existing = database.get("properties", {})
-        wanted = {"Source URL": {"url": {}}, "Source Creator": {"rich_text": {}}, "Source Views": {"number": {}}, "Source Followers": {"number": {}}, "Viral Ratio": {"number": {"format": "number"}}, "Discovery Method": {"rich_text": {}}, "Discovered At": {"date": {}}, "Source Published At": {"date": {}}, "Why Selected": {"rich_text": {}}}
+        wanted = {"Source URL": {"url": {}}, "Source Creator": {"rich_text": {}}, "Source Views": {"number": {}}, "Source Likes": {"number": {}}, "Source Comments": {"number": {}}, "Source Followers": {"number": {}}, "Viral Ratio": {"number": {"format": "number"}}, "Discovery Method": {"rich_text": {}}, "Discovered At": {"date": {}}, "Source Published At": {"date": {}}, "Why Selected": {"rich_text": {}}}
         conflicts = [name for name, spec in wanted.items() if name in existing and existing[name].get("type") != next(iter(spec))]
         if conflicts:
             raise RuntimeError(f"Notion schema type conflict for V2 properties: {', '.join(conflicts)}")
@@ -185,7 +185,7 @@ class NotionEditorialCalendar:
         # Content Intelligence is an ideas inbox.  Scheduling belongs to ARIA
         # after a run has finished, so source analysis must never reserve a
         # publishing slot or attach a date at creation time.
-        props = {"Name": {"title": [{"text": {"content": adaptation["internal_title"][:1800]}}]}, "Platform": {"select": {"name": "Instagram"}}, "IG Content Type": {"select": {"name": adaptation.get("ig_content_type") or "Tips"}}, "IG Status": {"select": {"name": "Idea"}}, "Content Type": {"select": {"name": adaptation.get("content_type") or "Hooks"}}, "Source URL": {"url": candidate.source_url}, "Source Creator": {"rich_text": _rich(candidate.creator_username)}, "Source Views": {"number": candidate.views}, "Source Followers": {"number": candidate.followers}, "Viral Ratio": {"number": candidate.viral_ratio}, "Discovery Method": {"rich_text": _rich(candidate.discovery_method)}, "Discovered At": {"date": {"start": candidate.discovered_at}}, "Why Selected": {"rich_text": _rich(adaptation.get("why_selected", ""))}}
+        props = {"Name": {"title": [{"text": {"content": adaptation["internal_title"][:1800]}}]}, "Platform": {"select": {"name": "Instagram"}}, "IG Content Type": {"select": {"name": adaptation.get("ig_content_type") or "Tips"}}, "IG Status": {"select": {"name": "Idea"}}, "Content Type": {"select": {"name": adaptation.get("content_type") or "Hooks"}}, "Source URL": {"url": candidate.source_url}, "Source Creator": {"rich_text": _rich(candidate.creator_username)}, "Source Views": {"number": candidate.views}, "Source Likes": {"number": candidate.likes}, "Source Comments": {"number": candidate.comments}, "Source Followers": {"number": candidate.followers}, "Viral Ratio": {"number": candidate.viral_ratio}, "Discovery Method": {"rich_text": _rich(candidate.discovery_method)}, "Discovered At": {"date": {"start": candidate.discovered_at}}, "Why Selected": {"rich_text": _rich(adaptation.get("why_selected", ""))}}
         if candidate.source_published_at:
             props["Source Published At"] = {"date": {"start": candidate.source_published_at}}
         page = self.client.pages.create(parent={"database_id": self.settings.notion_programme_content_db}, properties=props, children=_body(candidate, gemini, adaptation))

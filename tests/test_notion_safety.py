@@ -22,7 +22,7 @@ def test_notion_schema_conflict_never_updates():
 
 def test_editorial_calendar_dedupes_source_url():
     class Databases:
-        def retrieve(self, **_): return {"properties": {name: {"type": kind} for name, kind in {"Source URL": "url", "Source Creator": "rich_text", "Source Views": "number", "Source Followers": "number", "Viral Ratio": "number", "Discovery Method": "rich_text", "Discovered At": "date", "Source Published At": "date", "Why Selected": "rich_text"}.items()}}
+        def retrieve(self, **_): return {"properties": {name: {"type": kind} for name, kind in {"Source URL": "url", "Source Creator": "rich_text", "Source Views": "number", "Source Likes": "number", "Source Comments": "number", "Source Followers": "number", "Viral Ratio": "number", "Discovery Method": "rich_text", "Discovered At": "date", "Source Published At": "date", "Why Selected": "rich_text"}.items()}}
         def query(self, **_): return {"results": [{"url": "https://www.notion.so/existing"}]}
     class FakeClient:
         databases = Databases()
