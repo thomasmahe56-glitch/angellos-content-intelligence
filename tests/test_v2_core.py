@@ -104,6 +104,13 @@ def test_health_counts_cookie_auth_as_instagram_ready():
     assert health(Settings(instagram_cookies_b64="Y29va2ll")).get("instagram_session_ready") is True
 
 
+def test_health_requires_durable_state_page_for_production():
+    from content_agent.runner import health
+    result = health(Settings(openai_api_key="key", gemini_api_key="key", notion_api_key="key", notion_programme_content_db="db"))
+    assert result["status"] == "configuration_error"
+    assert "NOTION_CONTENT_AGENT_STATE_PAGE_ID" in result["missing"]
+
+
 def test_netscape_cookie_parser_supports_http_only(tmp_path):
     cookie_file = tmp_path / "cookies.txt"
     cookie_file.write_text("#HttpOnly_.instagram.com\tTRUE\t/\tTRUE\t123\tsessionid\tvalue\n")

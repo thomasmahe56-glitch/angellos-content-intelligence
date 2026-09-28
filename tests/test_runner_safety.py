@@ -18,7 +18,7 @@ def test_challenge_during_enrichment_stops_before_luna(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "NotionEditorialCalendar", Calendar)
     monkeypatch.setattr(runner, "fetch_angellos_context", lambda: "context")
     monkeypatch.setenv("CONTENT_AGENT_LOCAL_STATE_PATH", str(tmp_path / "state.json"))
-    cfg = Settings()
+    cfg = Settings(allow_ephemeral_state=True)
     result = asyncio.run(runner.run_daily_scout(cfg=cfg))
     assert result["status"] == "human_action_required"
     assert result["ai_calls"] == {"luna": 0, "gemini": 0}

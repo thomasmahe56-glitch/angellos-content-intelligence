@@ -64,7 +64,7 @@ def test_scout_orchestrates_one_content_idea_and_cleans_video(monkeypatch, tmp_p
     monkeypatch.setattr(runner, "fetch_angellos_context", lambda: "canonical context")
     monkeypatch.setenv("CONTENT_AGENT_LOCAL_STATE_PATH", str(tmp_path / "state.json"))
 
-    result = asyncio.run(runner.run_daily_scout(cfg=Settings()))
+    result = asyncio.run(runner.run_daily_scout(cfg=Settings(allow_ephemeral_state=True)))
 
     assert result["status"] == "completed"
     assert result["content_ideas_created"] == 1
@@ -103,7 +103,7 @@ def test_max_content_zero_never_downloads_or_creates(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "fetch_angellos_context", lambda: "context")
     monkeypatch.setenv("CONTENT_AGENT_LOCAL_STATE_PATH", str(tmp_path / "state.json"))
 
-    result = asyncio.run(runner.run_daily_scout(max_content=0, cfg=Settings()))
+    result = asyncio.run(runner.run_daily_scout(max_content=0, cfg=Settings(allow_ephemeral_state=True)))
     assert result["relevance_qualified"] == 1
     assert result["videos_downloaded"] == 0
     assert result["content_ideas_created"] == 0

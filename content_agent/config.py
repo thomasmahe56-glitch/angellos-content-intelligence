@@ -28,6 +28,9 @@ class Settings:
     notion_api_key: str = os.getenv("NOTION_API_KEY", "")
     notion_programme_content_db: str = os.getenv("NOTION_PROGRAMME_CONTENT_DB", "")
     notion_state_page_id: str = os.getenv("NOTION_CONTENT_AGENT_STATE_PAGE_ID", "")
+    # Local tests and intentional dry-runs may use a file ledger. Production
+    # defaults to durable Notion state so redeploys cannot reprocess Reels.
+    allow_ephemeral_state: bool = _bool("CONTENT_AGENT_ALLOW_EPHEMERAL_STATE", False)
     instagram_session_path: str = os.getenv("INSTAGRAM_SESSION_PATH", "/tmp/instagram-session.json")
     instagram_cookies_file: str = os.getenv("INSTAGRAM_COOKIES_FILE", "/tmp/instagram-cookies.txt")
     instagram_cookies_b64: str = os.getenv("INSTAGRAM_COOKIES_B64", "")

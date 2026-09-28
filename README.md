@@ -55,6 +55,9 @@ DELETE_SOURCE_VIDEO_AFTER_ANALYSIS=true
 CONTENT_AGENT_LOG_FORMAT=json
 ```
 
+`CONTENT_AGENT_ALLOW_EPHEMERAL_STATE=true` is only for local tests or deliberate
+dry-runs. Never set it in Railway production.
+
 `NOTION_CONTENT_AGENT_STATE_PAGE_ID` must be a private, dedicated Notion page shared
 with the integration. It keeps compact candidate state, follower cache and dedupe
 records across Railway deploys. Never put keys, cookies or a password in Git.

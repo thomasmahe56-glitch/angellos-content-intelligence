@@ -31,7 +31,7 @@ def main() -> None:
         from content_agent.discovery.instagram_browser import InstagramBrowser
         asyncio.run(InstagramBrowser(settings).login_interactively()); return
     if args.command == "health":
-        missing = [name for name, value in {"OPENAI_API_KEY": settings.openai_api_key, "OPENAI_CONTENT_MODEL": settings.openai_content_model, "GEMINI_API_KEY": settings.gemini_api_key, "NOTION_API_KEY": settings.notion_api_key, "NOTION_PROGRAMME_CONTENT_DB": settings.notion_programme_content_db}.items() if not is_configured(value)]
+        missing = [name for name, value in {"OPENAI_API_KEY": settings.openai_api_key, "OPENAI_CONTENT_MODEL": settings.openai_content_model, "GEMINI_API_KEY": settings.gemini_api_key, "NOTION_API_KEY": settings.notion_api_key, "NOTION_PROGRAMME_CONTENT_DB": settings.notion_programme_content_db, "NOTION_CONTENT_AGENT_STATE_PAGE_ID": settings.notion_state_page_id}.items() if not is_configured(value)]
         instagram_auth_configured = Path(settings.instagram_session_path).exists() or is_configured(settings.instagram_cookies_b64)
         result = {"status": "ok" if not missing else "configuration_error", "missing": missing, "instagram_session_ready": instagram_auth_configured, "durable_state_configured": is_configured(settings.notion_state_page_id), "model": settings.openai_content_model or None}
     elif args.command == "status":

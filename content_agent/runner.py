@@ -28,6 +28,10 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
     event(logger, "SCOUT started", dry_run=dry_run)
     deadline = time.monotonic() + cfg.run_timeout_seconds
     state_store = StateStore(cfg)
+    if not state_store.durable and not (dry_run or cfg.allow_ephemeral_state):
+        report.status = "configuration_error"
+        report.errors = ["NOTION_CONTENT_AGENT_STATE_PAGE_ID is required for durable production state"]
+        return report.finish()
     state = state_store.load()
     browser = InstagramBrowser(cfg)
     try:
@@ -290,7 +294,7 @@ async def sync_performance() -> dict:
 
 
 def health(cfg: Settings = settings) -> dict:
-    missing = [name for name, value in {"OPENAI_API_KEY": cfg.openai_api_key, "OPENAI_CONTENT_MODEL": cfg.openai_content_model, "GEMINI_API_KEY": cfg.gemini_api_key, "NOTION_API_KEY": cfg.notion_api_key, "NOTION_PROGRAMME_CONTENT_DB": cfg.notion_programme_content_db}.items() if not is_configured(value)]
+    missing = [name for name, value in {"OPENAI_API_KEY": cfg.openai_api_key, "OPENAI_CONTENT_MODEL": cfg.openai_content_model, "GEMINI_API_KEY": cfg.gemini_api_key, "NOTION_API_KEY": cfg.notion_api_key, "NOTION_PROGRAMME_CONTENT_DB": cfg.notion_programme_content_db, "NOTION_CONTENT_AGENT_STATE_PAGE_ID": cfg.notion_state_page_id}.items() if not is_configured(value)]
     instagram_auth_configured = Path(cfg.instagram_session_path).exists() or is_configured(cfg.instagram_cookies_b64)
     return {"status": "ok" if not missing else "configuration_error", "missing": missing, "instagram_session_ready": instagram_auth_configured, "durable_state_configured": is_configured(cfg.notion_state_page_id), "model": cfg.openai_content_model or None}
 
