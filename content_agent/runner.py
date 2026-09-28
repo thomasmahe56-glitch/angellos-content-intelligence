@@ -17,6 +17,7 @@ from content_agent.models.schemas import RunReport
 from content_agent.storage.notion import NotionEditorialCalendar
 from content_agent.storage.state import StateStore
 from content_agent.utils.logging import event, get_logger
+from config import ANGELLOS_NICHE_CONTEXT
 from phase2_analysis.notion_context import fetch_angellos_context
 
 
@@ -36,7 +37,10 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
         return report.finish()
     calendar = NotionEditorialCalendar(cfg)
     try:
-        context = fetch_angellos_context()
+        # Notion is canonical when reachable.  A deliberately small existing
+        # product description keeps the safety gates meaningful during a
+        # transient Notion outage; it is not a replacement for live context.
+        context = fetch_angellos_context() or ANGELLOS_NICHE_CONTEXT.strip()
         recent = calendar.recent_content()
     except Exception as exc:
         report.status, report.errors = "configuration_error", [str(exc)]

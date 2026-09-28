@@ -20,12 +20,19 @@ class NotionEditorialCalendar:
 
     def recent_content(self) -> list[dict[str, Any]]:
         self._require()
-        response = self.client.databases.query(database_id=self.settings.notion_programme_content_db, page_size=100)
         content = []
-        for page in response.get("results", []):
-            p = page.get("properties", {})
-            content.append({"title": _text(p.get("Name", {})), "date": ((p.get("Date of Publish", {}).get("date") or {}).get("start") or ""), "status": ((p.get("IG Status", {}).get("select") or {}).get("name") or ""), "source_url": p.get("Source URL", {}).get("url") or ""})
-        return content
+        cursor = None
+        while True:
+            kwargs = {"database_id": self.settings.notion_programme_content_db, "page_size": 100}
+            if cursor:
+                kwargs["start_cursor"] = cursor
+            response = self.client.databases.query(**kwargs)
+            for page in response.get("results", []):
+                p = page.get("properties", {})
+                content.append({"title": _text(p.get("Name", {})), "date": ((p.get("Date of Publish", {}).get("date") or {}).get("start") or ""), "status": ((p.get("IG Status", {}).get("select") or {}).get("name") or ""), "source_url": p.get("Source URL", {}).get("url") or ""})
+            if not response.get("has_more"):
+                return content
+            cursor = response.get("next_cursor")
 
     def performance_rows(self) -> list[dict[str, Any]]:
         """Read published Angellos signals without guessing missing metrics."""

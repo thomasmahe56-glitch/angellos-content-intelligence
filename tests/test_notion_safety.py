@@ -45,3 +45,21 @@ def test_production_body_has_required_source_and_production_sections():
     adaptation = {"why_selected": "why", "angellos_angle": "angle", "hook": "hook", "script": {"hook": "hook", "development": [], "cta": "cta"}, "shot_list": [{"start": 0, "end": 3, "shot": "face", "spoken": "hi", "on_screen_text": "hi", "b_roll": "dashboard", "editing": "cut"}], "filming": {"screen_recordings_needed": ["inbox"]}, "editing": {}, "caption": "caption", "cta": "cta", "why_test_this": "test", "facts_that_must_be_verified_before_filming": []}
     headings = [b.get("heading_1", {}).get("rich_text", [{}])[0].get("text", {}).get("content") for b in _body(candidate, gemini, adaptation) if b["type"] == "heading_1"]
     assert {"Source analysis", "Screen recordings required", "B-roll", "Editing instructions", "Caption", "CTA"}.issubset(headings)
+
+
+def test_recent_content_paginates_all_editorial_rows():
+    def page(title):
+        return {"properties": {"Name": {"title": [{"plain_text": title}]}}}
+
+    class Databases:
+        def query(self, **kwargs):
+            if kwargs.get("start_cursor") == "second":
+                return {"results": [page("second")], "has_more": False}
+            return {"results": [page("first")], "has_more": True, "next_cursor": "second"}
+
+    class FakeClient:
+        databases = Databases()
+
+    calendar = NotionEditorialCalendar(Settings(notion_api_key="key", notion_programme_content_db="db"))
+    calendar.client = FakeClient()
+    assert [item["title"] for item in calendar.recent_content()] == ["first", "second"]
