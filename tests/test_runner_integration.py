@@ -150,6 +150,10 @@ def test_manual_analysis_gets_one_quality_correction_before_creating(monkeypatch
 
     async def download(_): return {"local_path": str(video), "caption_originale": "caption"}
     async def gemini(*_): return {"_gemini_model_used": "fake-gemini"}
+    async def apify_metrics(candidates, *_):
+        candidates[0].views, candidates[0].followers = 200_000, 10_000
+        from content_agent.discovery.apify_metrics import ApifyMetricsResult
+        return ApifyMetricsResult(enriched=1, cost_usd=0.03, run_id="run")
 
     download_module = types.ModuleType("content_agent.video.downloader")
     download_module.download = download
@@ -164,8 +168,10 @@ def test_manual_analysis_gets_one_quality_correction_before_creating(monkeypatch
     monkeypatch.setattr(runner, "adapt_to_angellos", adapt)
     monkeypatch.setattr(runner, "quality_check", quality)
     monkeypatch.setattr(runner, "fetch_angellos_context", lambda: "canonical context")
+    import content_agent.discovery.apify_metrics as apify_module
+    monkeypatch.setattr(apify_module, "enrich_reel_metrics", apify_metrics)
 
-    result = asyncio.run(runner.analyze_reel_url("https://www.instagram.com/reel/abc/", cfg=Settings()))
+    result = asyncio.run(runner.analyze_reel_url("https://www.instagram.com/reel/abc/", cfg=Settings(apify_metrics_fallback=True, apify_api_key="key")))
 
     assert result["status"] == "completed"
     assert result["content_ideas_created"] == 1
@@ -173,5 +179,6 @@ def test_manual_analysis_gets_one_quality_correction_before_creating(monkeypatch
     assert len(adaptation_contexts) == 2
     assert "Correct these quality issues" in adaptation_contexts[1]
     assert result["costs"]["luna_input_tokens"] == 123
+    assert result["costs"]["apify_usd"] == 0.03
     assert created
     assert not video.exists()

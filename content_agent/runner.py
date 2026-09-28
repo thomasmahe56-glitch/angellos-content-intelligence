@@ -234,8 +234,21 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
         return report.finish()
     candidate = Candidate(source_url=source_url, shortcode=match.group(1), discovery_method="manual_url")
     calendar = NotionEditorialCalendar(cfg)
+    apify_cost_usd = 0.0
+    apify_cost_known = True
     try:
         await browser.enrich(candidate, {})
+        # The direct/manual route is still a production artifact: preserve the
+        # same verifiable source metrics as the daily scout when the bounded
+        # Apify fallback is enabled. Browser data stays the free first choice.
+        if cfg.apify_metrics_fallback and cfg.apify_api_key:
+            try:
+                from content_agent.discovery.apify_metrics import enrich_reel_metrics
+                apify_result = await enrich_reel_metrics([candidate], cfg.apify_api_key, 1)
+                apify_cost_usd = apify_result.cost_usd or 0.0
+                apify_cost_known = apify_result.cost_usd is not None
+            except Exception as exc:
+                report.errors.append(f"apify_metrics_fallback_failed: {exc}")
         candidate.viral_ratio = viral_ratio(candidate.views, candidate.followers)
         context, recent, historical = fetch_angellos_context(), calendar.recent_content(), _historical_signals()
         reel = await download(candidate.source_url)
@@ -244,7 +257,7 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
             gemini = await analyze_video(reel["local_path"], reel.get("caption_originale", candidate.caption_preview))
         except GeminiAnalysisError as exc:
             report.status, report.failed, report.errors = "partial_failure", 1, [f"video_analysis_pending: {exc}"]
-            report.costs = _unknown_cost_report()
+            report.costs = _cost_report_without_luna(report, cfg, apify_cost_usd, apify_cost_known)
             return report.finish()
         report.ai_calls["gemini"] = 1
         report.videos_analyzed = 1
@@ -269,13 +282,13 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
         report.ai_calls["luna"] = luna.calls
         if not gate["approved"]:
             report.status, report.failed, report.errors = "partial_failure", 1, ["quality_gate_rejected: " + "; ".join(gate["issues"])]
-            _set_cost_report(report, cfg, luna, 0.0, True)
+            _set_cost_report(report, cfg, luna, apify_cost_usd, apify_cost_known)
             return report.finish()
         notion_url = calendar.create(candidate, gemini, adaptation, dry_run=dry_run)
         if not dry_run:
             report.content_ideas_created = 1
             report.created_items.append({"title": adaptation["internal_title"], "notion_url": notion_url, "viral_ratio": candidate.viral_ratio})
-        _set_cost_report(report, cfg, luna, 0.0, True)
+        _set_cost_report(report, cfg, luna, apify_cost_usd, apify_cost_known)
         return report.finish()
     except Exception as exc:
         report.status, report.failed, report.errors = "partial_failure", 1, [str(exc)]
@@ -345,6 +358,14 @@ def _unknown_cost_report() -> dict:
         "luna_output_tokens": 0,
         "gemini_videos": 0,
     }
+
+
+def _cost_report_without_luna(report: RunReport, cfg: Settings, apify_cost_usd: float, apify_cost_known: bool) -> dict:
+    """Report known collection/perception costs when Gemini fails before Luna."""
+    gemini_cost = report.videos_analyzed * cfg.gemini_analysis_usd_per_video if cfg.gemini_analysis_usd_per_video is not None else None
+    values = {"apify_usd": apify_cost_usd if apify_cost_known else None, "luna_usd": 0.0, "gemini_usd": gemini_cost}
+    total = sum(values.values()) if all(value is not None for value in values.values()) else None
+    return {**values, "total_usd": total, "currency": "USD", "complete": total is not None, "luna_input_tokens": 0, "luna_output_tokens": 0, "gemini_videos": report.videos_analyzed}
 
 
 async def sync_performance() -> dict:
