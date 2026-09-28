@@ -11,6 +11,9 @@ INSTAGRAM_ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN", "")
 INSTAGRAM_ACCOUNT_ID = os.getenv("INSTAGRAM_ACCOUNT_ID", "me")
 INSTAGRAM_COOKIES_B64 = os.getenv("INSTAGRAM_COOKIES_B64", "")
 INSTAGRAM_COOKIES_FILE = os.getenv("INSTAGRAM_COOKIES_FILE", "/tmp/instagram-cookies.txt")
+# Playwright storage state is the V2 source of authenticated browser session.
+# Cookie-file support remains for legacy/manual downloader use.
+INSTAGRAM_SESSION_PATH = os.getenv("INSTAGRAM_SESSION_PATH", "")
 NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 NOTION_ANGELLOS_CONTEXT_DB = os.getenv("NOTION_ANGELLOS_CONTEXT_DB", "")
 NOTION_ANGELLOS_RESULTS_DB = os.getenv("NOTION_ANGELLOS_RESULTS_DB", "")
@@ -24,6 +27,8 @@ VIDEO_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("VIDEO_DOWNLOAD_TIMEOUT_SECONDS",
 # If the primary model returns 429 quota-limit-0 (model unavailable for this key),
 # the analyzer tries each fallback in order before giving up on Gemini entirely.
 GEMINI_MODEL_PRIMARY = os.getenv("GEMINI_MODEL_PRIMARY", "gemini-2.0-flash")
+# V2 name; GEMINI_MODEL_PRIMARY remains supported for existing deployments.
+GEMINI_MODEL_PRIMARY = os.getenv("GEMINI_VIDEO_MODEL", GEMINI_MODEL_PRIMARY)
 # Fallback chain built from models actually present for this API key (verified via ListModels).
 # gemini-1.5-* are NOT available for this key (404).
 # gemini-2.5-flash works but requires JSON mode disabled (thinking incompatible with JSON mode in SDK 0.7.x).

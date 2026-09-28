@@ -27,20 +27,17 @@ from config import (
 )
 from utils.logger import log_info, log_success, log_error
 
-if not GEMINI_API_KEY:
-    raise EnvironmentError(
-        "GEMINI_API_KEY is not set. "
-        "Add it to your Railway environment variables."
-    )
-
-genai.configure(api_key=GEMINI_API_KEY)
+# Configuration is deliberately lazy so `python -m content_agent health` works
+# without spending a credential or importing a broken runtime configuration.
 
 _UPLOAD_TIMEOUT_SECONDS = 180
 _GENERATION_TIMEOUT_SECONDS = 120
 _MAX_UPLOAD_POLLS = 60
 
 ANALYSIS_PROMPT = """
-Analyze this Instagram Reel in detail. Reply in JSON with exactly these fields:
+You are a factual video observer. Analyze this Instagram Reel; do not infer facts that
+are not audible or visible, do not explain Angellos, and use null, [] or "" when unknown.
+Reply in JSON with exactly these fields:
 
 {
   "hook": "exact text of the first 3 seconds or visual description of the hook",
@@ -54,7 +51,19 @@ Analyze this Instagram Reel in detail. Reply in JSON with exactly these fields:
   "sous_titres": true,
   "musique": "description or 'none'",
   "points_forts": ["list of the 3 strengths that make this Reel perform well"],
-  "pattern_replicable": "description of the main pattern to replicate"
+  "pattern_replicable": "description of the abstract creative pattern, not copied wording",
+  "transcript": "spoken words when audible",
+  "timeline": [{"start": 0, "end": 3, "spoken": "", "on_screen_text": "", "visual_action": "", "camera": "", "editing": "", "purpose": ""}],
+  "camera_style": "",
+  "cuts": {"estimated_count": null, "average_frequency_seconds": null},
+  "b_roll": [],
+  "screen_recordings": [],
+  "pattern_interrupts": [],
+  "sound_effects": [],
+  "payoff": "",
+  "retention_mechanisms": [],
+  "emotion_or_tension": "",
+  "notable_details": []
 }
 
 Be precise and factual. Do not comment, return only valid JSON.
@@ -112,6 +121,9 @@ def _should_try_next_model(exc: Exception) -> bool:
 
 
 def upload_video(local_path: str) -> genai.types.File:
+    if not GEMINI_API_KEY:
+        raise EnvironmentError("GEMINI_API_KEY is not set. Add it to Railway environment variables.")
+    genai.configure(api_key=GEMINI_API_KEY)
     path = Path(local_path)
     if not path.exists():
         raise FileNotFoundError(f"Video file not found: {local_path}")

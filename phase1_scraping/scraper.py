@@ -18,6 +18,7 @@ from config import (
     DOWNLOADS_DIR,
     INSTAGRAM_COOKIES_B64,
     INSTAGRAM_COOKIES_FILE,
+    INSTAGRAM_SESSION_PATH,
     MAX_REELS_PER_ACCOUNT,
 )
 from utils.logger import log_info, log_success, log_error
@@ -113,13 +114,17 @@ async def _download_one(url: str, account: Optional[str] = None) -> Optional[dic
         browser = None
         try:
             browser = await p.chromium.launch(headless=True)
-            ctx = await browser.new_context(
-                user_agent=(
+            context_options = {
+                "user_agent": (
                     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
                     "AppleWebKit/605.1.15 (KHTML, like Gecko) "
                     "Version/16.0 Mobile/15E148 Safari/604.1"
                 )
-            )
+            }
+            if INSTAGRAM_SESSION_PATH and Path(INSTAGRAM_SESSION_PATH).is_file():
+                context_options["storage_state"] = INSTAGRAM_SESSION_PATH
+                log_info(f"{shortcode}: using persistent Playwright Instagram session")
+            ctx = await browser.new_context(**context_options)
             cookie_path = _get_instagram_cookie_file()
             if cookie_path:
                 await _add_instagram_cookies_to_context(ctx, cookie_path)

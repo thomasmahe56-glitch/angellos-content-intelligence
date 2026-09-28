@@ -73,6 +73,26 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+
+@app.get("/agent/health")
+async def agent_health():
+    """V2 autonomous-agent health endpoint; dashboard routes remain unchanged."""
+    from content_agent.runner import health
+    return JSONResponse(health())
+
+
+@app.post("/agent/scout")
+async def agent_scout(request: Request):
+    body = await request.json()
+    from content_agent.runner import run_daily_scout
+    result = await run_daily_scout(
+        dry_run=bool(body.get("dry_run", False)),
+        max_reels=body.get("max_reels"),
+        max_content=body.get("max_content"),
+    )
+    code = 202 if result.get("status") == "completed" else 207
+    return JSONResponse(result, status_code=code)
+
 _cors_origins = [
     "http://localhost:8080",
     "http://localhost:5173",
