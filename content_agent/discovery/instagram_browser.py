@@ -160,6 +160,9 @@ class InstagramBrowser:
         try:
             await page.goto(f"https://www.instagram.com/{creator}/", wait_until="domcontentloaded", timeout=45_000)
             await self._raise_if_challenge(page)
+            # Instagram hydrates profile counters after DOMContentLoaded.
+            # Without this bounded wait, a valid profile can look metric-less.
+            await asyncio.sleep(1.5)
             text = await page.locator("body").inner_text(timeout=10_000)
             match = re.search(r"([0-9][0-9.,\s]*[KM]?)\s+follower(?:s)?", text, re.I)
             return parse_compact_number(match.group(1)) if match else None
