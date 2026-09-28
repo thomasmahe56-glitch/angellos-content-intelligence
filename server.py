@@ -3,6 +3,7 @@ Lance le dashboard React (Vite, port 5173) et l'API FastAPI (port 8000)
 avec une seule commande : python server.py
 """
 import asyncio
+import hmac
 import json
 import os
 import signal
@@ -14,7 +15,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -74,6 +75,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+def _require_agent_token(request: Request) -> None:
+    """Protect cost-incurring V2 routes from public invocation."""
+    expected = os.getenv("AGENT_API_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="AGENT_API_TOKEN is not configured")
+    supplied = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 @app.get("/agent/health")
 async def agent_health():
     """V2 autonomous-agent health endpoint; dashboard routes remain unchanged."""
@@ -83,6 +94,7 @@ async def agent_health():
 
 @app.post("/agent/scout")
 async def agent_scout(request: Request):
+    _require_agent_token(request)
     body = await request.json()
     from content_agent.runner import run_daily_scout
     result = await run_daily_scout(
@@ -92,6 +104,19 @@ async def agent_scout(request: Request):
     )
     code = 202 if result.get("status") == "completed" else 207
     return JSONResponse(result, status_code=code)
+
+
+@app.post("/agent/analyze")
+async def agent_analyze(request: Request):
+    """Run one explicitly supplied Reel through the V2 production pipeline."""
+    _require_agent_token(request)
+    body = await request.json()
+    source_url = (body.get("url") or "").strip()
+    if not source_url:
+        return JSONResponse({"error": "Instagram Reel URL is required"}, status_code=400)
+    from content_agent.runner import analyze_reel_url
+    result = await analyze_reel_url(source_url, dry_run=bool(body.get("dry_run", False)))
+    return JSONResponse(result, status_code=200 if result.get("status") == "completed" else 207)
 
 _cors_origins = [
     "http://localhost:8080",

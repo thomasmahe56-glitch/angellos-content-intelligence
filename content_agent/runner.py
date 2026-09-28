@@ -244,6 +244,7 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
             gemini = await analyze_video(reel["local_path"], reel.get("caption_originale", candidate.caption_preview))
         except GeminiAnalysisError as exc:
             report.status, report.failed, report.errors = "partial_failure", 1, [f"video_analysis_pending: {exc}"]
+            report.costs = _unknown_cost_report()
             return report.finish()
         report.ai_calls["gemini"] = 1
         report.videos_analyzed = 1
@@ -253,14 +254,17 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
         report.ai_calls["luna"] = luna.calls
         if not gate["approved"]:
             report.status, report.failed, report.errors = "partial_failure", 1, ["quality_gate_rejected: " + "; ".join(gate["issues"])]
+            _set_cost_report(report, cfg, luna, 0.0, True)
             return report.finish()
         notion_url = calendar.create(candidate, gemini, adaptation, dry_run=dry_run)
         if not dry_run:
             report.content_ideas_created = 1
             report.created_items.append({"title": adaptation["internal_title"], "notion_url": notion_url, "viral_ratio": candidate.viral_ratio})
+        _set_cost_report(report, cfg, luna, 0.0, True)
         return report.finish()
     except Exception as exc:
         report.status, report.failed, report.errors = "partial_failure", 1, [str(exc)]
+        report.costs = _unknown_cost_report()
         return report.finish()
     finally:
         # This direct command follows the same source-retention policy as the scout.
@@ -302,6 +306,10 @@ def _set_cost_report(report: RunReport, cfg: Settings, luna, apify_cost_usd: flo
     values = {"apify_usd": apify_cost_usd if apify_cost_known else None, "luna_usd": luna_cost, "gemini_usd": gemini_cost}
     total = sum(values.values()) if all(value is not None for value in values.values()) else None
     report.costs = {**values, "total_usd": total, "currency": "USD", "complete": total is not None}
+
+
+def _unknown_cost_report() -> dict:
+    return {"apify_usd": 0.0, "luna_usd": None, "gemini_usd": None, "total_usd": None, "currency": "USD", "complete": False}
 
 
 async def sync_performance() -> dict:
