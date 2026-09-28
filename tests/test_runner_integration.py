@@ -109,6 +109,37 @@ def test_max_content_zero_never_downloads_or_creates(monkeypatch, tmp_path):
     assert result["content_ideas_created"] == 0
 
 
+def test_scout_uses_apify_only_for_browser_metric_gaps(monkeypatch, tmp_path):
+    class Browser:
+        async def check_authentication(self): pass
+        async def discover(self, _):
+            return [Candidate(source_url="https://www.instagram.com/reel/abc/", shortcode="abc")]
+        async def enrich(self, candidate, _):
+            candidate.creator_username = "creator"
+            candidate.views, candidate.followers, candidate.media_is_video = 10_000, 10_000, True
+            return candidate
+
+    class Calendar:
+        def __init__(self, *_): pass
+        def recent_content(self): return []
+
+    apify_calls = []
+    async def apify(candidates, *_):
+        apify_calls.append(candidates)
+        raise AssertionError("Apify must not run when browser metrics are present")
+
+    import content_agent.discovery.apify_metrics as apify_module
+    monkeypatch.setattr(apify_module, "enrich_reel_metrics", apify)
+    monkeypatch.setattr(runner, "InstagramBrowser", lambda _: Browser())
+    monkeypatch.setattr(runner, "NotionEditorialCalendar", Calendar)
+    monkeypatch.setattr(runner, "fetch_angellos_context", lambda: "context")
+    monkeypatch.setenv("CONTENT_AGENT_LOCAL_STATE_PATH", str(tmp_path / "state.json"))
+
+    result = asyncio.run(runner.run_daily_scout(max_content=0, cfg=Settings(allow_ephemeral_state=True, apify_metrics_fallback=True, apify_api_key="key")))
+    assert result["rejected_ratio"] == 1
+    assert apify_calls == []
+
+
 def test_manual_analysis_gets_one_quality_correction_before_creating(monkeypatch, tmp_path):
     """Manual endpoint must have the same bounded correction as the scout."""
     video = tmp_path / "manual-source.mp4"

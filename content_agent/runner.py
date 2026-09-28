@@ -65,19 +65,11 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
         return report.finish()
     report.scanned = len(candidates)
     event(logger, "SCOUT discovered", scanned=report.scanned)
-    if cfg.apify_metrics_fallback and cfg.apify_api_key:
-        try:
-            from content_agent.discovery.apify_metrics import enrich_reel_metrics
-            apify_result = await enrich_reel_metrics(candidates, cfg.apify_api_key, cfg.apify_metrics_max_reels)
-            apify_cost_usd = apify_result.cost_usd or 0.0
-            apify_cost_known = apify_result.cost_usd is not None
-            event(logger, "APIFY metric fallback completed", reels_with_views=apify_result.enriched)
-        except Exception as exc:
-            # Browser discovery remains usable if the optional paid fallback is
-            # unavailable. Candidates without verifiable metrics are safely
-            # retained as insufficient_metrics below.
-            report.errors.append(f"apify_metrics_fallback_failed: {exc}")
-    new = []
+    # Instagram is the primary metric source. Apify is deliberately deferred
+    # until the browser has tried every candidate, so a normal run does not pay
+    # to enrich visible counters again.
+    metric_candidates = []
+    missing_metrics = []
     for candidate in candidates:
         if time.monotonic() >= deadline:
             report.status = "partial_failure"
@@ -94,17 +86,11 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
             if candidate.creator_username.lower().lstrip("@") == cfg.angellos_instagram_account:
                 StateStore.mark(state, candidate, "rejected_own_account")
                 continue
-            candidate.viral_ratio = viral_ratio(candidate.views, candidate.followers)
             report.new_reels += 1
-            if candidate.viral_ratio is None:
-                StateStore.mark(state, candidate, "insufficient_metrics")
-            elif candidate.viral_ratio < cfg.viral_ratio_min:
-                StateStore.mark(state, candidate, "rejected_ratio")
-                report.rejected_ratio += 1
+            if candidate.views is None or candidate.followers is None:
+                missing_metrics.append(candidate)
             else:
-                StateStore.mark(state, candidate, "discovered")
-                new.append(candidate)
-                report.viral_candidates += 1
+                metric_candidates.append(candidate)
         except InstagramHumanActionRequired as exc:
             report.human_action_required, report.human_action_reason = True, str(exc)
             break
@@ -121,6 +107,30 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
         report.status = "human_action_required"
         event(logger, "SCOUT human action required", reason=report.human_action_reason)
         return report.finish()
+    if missing_metrics and cfg.apify_metrics_fallback and cfg.apify_api_key:
+        try:
+            from content_agent.discovery.apify_metrics import enrich_reel_metrics
+            apify_result = await enrich_reel_metrics(missing_metrics, cfg.apify_api_key, min(cfg.apify_metrics_max_reels, len(missing_metrics)))
+            apify_cost_usd = apify_result.cost_usd or 0.0
+            apify_cost_known = apify_result.cost_usd is not None
+            event(logger, "APIFY metric fallback completed", requested=len(missing_metrics), reels_with_views=apify_result.enriched)
+        except Exception as exc:
+            # Browser discovery remains usable if the optional paid fallback is
+            # unavailable. Candidates without verifiable metrics are safely
+            # retained as insufficient_metrics below.
+            report.errors.append(f"apify_metrics_fallback_failed: {exc}")
+    new = []
+    for candidate in [*metric_candidates, *missing_metrics]:
+        candidate.viral_ratio = viral_ratio(candidate.views, candidate.followers)
+        if candidate.viral_ratio is None:
+            StateStore.mark(state, candidate, "insufficient_metrics")
+        elif candidate.viral_ratio < cfg.viral_ratio_min:
+            StateStore.mark(state, candidate, "rejected_ratio")
+            report.rejected_ratio += 1
+        else:
+            StateStore.mark(state, candidate, "discovered")
+            new.append(candidate)
+            report.viral_candidates += 1
     luna = LunaClient(cfg)
     event(logger, "VIRAL filtering complete", viral_candidates=report.viral_candidates, rejected_ratio=report.rejected_ratio)
     qualified = []
