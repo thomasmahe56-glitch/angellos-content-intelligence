@@ -134,6 +134,16 @@ def test_state_store_rejects_placeholder_page_id():
     assert not StateStore(Settings(notion_api_key="key", notion_state_page_id="__REPLACE_ME__")).durable
 
 
+def test_run_analysis_reservation_enforces_a_durable_cap():
+    state = {"reels": {}, "followers": {}}
+    assert StateStore.reserve_run_analysis(state, "run-1", "reel-a", 2)
+    assert StateStore.reserve_run_analysis(state, "run-1", "reel-b", 2)
+    assert not StateStore.reserve_run_analysis(state, "run-1", "reel-c", 2)
+    # Replaying a source is idempotent and does not consume another slot.
+    assert StateStore.reserve_run_analysis(state, "run-1", "reel-a", 2)
+    assert StateStore.reserve_run_analysis(state, "run-2", "reel-c", 2)
+
+
 def test_state_store_strict_mode_rejects_durable_read_failure(tmp_path):
     class BrokenBlocks:
         children = None

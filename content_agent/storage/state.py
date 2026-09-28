@@ -82,6 +82,23 @@ class StateStore:
             record[key] = str(value)[:500] if key == "error" else value
         record["status"] = status
 
+    @staticmethod
+    def reserve_run_analysis(state: dict[str, Any], run_id: str, candidate_key: str, maximum: int) -> bool:
+        """Atomically (for our serial runner) reserve one paid analysis slot.
+
+        The Computer Use endpoint receives one Reel at a time, so its cap has
+        to live in durable state rather than in an in-memory request counter.
+        A source already reserved in this run never consumes a second slot.
+        """
+        run = state.setdefault("runs", {}).setdefault(run_id, {"analysis_candidates": []})
+        reserved = run.setdefault("analysis_candidates", [])
+        if candidate_key in reserved:
+            return True
+        if len(reserved) >= maximum:
+            return False
+        reserved.append(candidate_key)
+        return True
+
     def _notion_blocks(self) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         cursor = None

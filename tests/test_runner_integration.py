@@ -156,6 +156,7 @@ def test_manual_analysis_gets_one_quality_correction_before_creating(monkeypatch
     class Calendar:
         def __init__(self, *_): pass
         def recent_content(self): return []
+        def source_page_url(self, _): return None
         def create(self, *_args, **_kwargs):
             created.append(True)
             return "https://www.notion.so/idea"
@@ -222,6 +223,7 @@ def test_computer_use_metrics_skip_browser_and_apify(monkeypatch, tmp_path):
     class Calendar:
         def __init__(self, *_): pass
         def recent_content(self): return []
+        def source_page_url(self, _): return None
         def create(self, *_args, **_kwargs): return "https://www.notion.so/idea"
 
     class Luna:
@@ -258,7 +260,8 @@ def test_computer_use_metrics_skip_browser_and_apify(monkeypatch, tmp_path):
     result = asyncio.run(runner.analyze_reel_url(
         "https://www.instagram.com/reel/abc/",
         observed_metrics={"likes": 58_800, "comments": 216, "creator_username": "creator", "caption_preview": "visible caption"},
-        cfg=Settings(apify_metrics_fallback=True, apify_api_key="must-not-be-used"),
+        run_id="computer-use-test",
+        cfg=Settings(allow_ephemeral_state=True, apify_metrics_fallback=True, apify_api_key="must-not-be-used"),
     ))
 
     assert result["status"] == "completed"

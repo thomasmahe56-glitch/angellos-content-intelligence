@@ -308,6 +308,8 @@ async def analyze_reel_url(
     report = RunReport(scanned=1, new_reels=1)
     if observed_metrics is not None and not isinstance(observed_metrics, dict):
         return {"status": "configuration_error", "error": "observed_metrics must be an object"}
+    if observed_metrics is not None and not run_id.strip():
+        return {"status": "configuration_error", "error": "run_id is required for Computer Use analysis"}
 
     def observed_int(name: str) -> Optional[int]:
         value = (observed_metrics or {}).get(name)
@@ -355,6 +357,28 @@ async def analyze_reel_url(
     apify_cost_usd = 0.0
     apify_cost_known = True
     try:
+        # Do this before downloading a video or calling an LLM: repeat URLs
+        # return their existing page at zero marginal model cost.
+        existing_url = calendar.source_page_url(candidate.source_url)
+        if existing_url:
+            report.duplicates = 1
+            report.created_items.append({"notion_url": existing_url, "deduplicated": True, "run_id": candidate.run_id})
+            _set_cost_report(report, cfg, None, apify_cost_usd, apify_cost_known)
+            return report.finish()
+        if observed_metrics is not None:
+            state_store = StateStore(cfg)
+            if not state_store.durable and not (dry_run or cfg.allow_ephemeral_state):
+                return {"status": "configuration_error", "error": "NOTION_CONTENT_AGENT_STATE_PAGE_ID is required for durable Computer Use cost caps"}
+            state = state_store.load(strict=state_store.durable and not cfg.allow_ephemeral_state)
+            if not StateStore.reserve_run_analysis(state, candidate.run_id, candidate.key, cfg.analyze_max_per_run):
+                return {
+                    "status": "budget_exhausted",
+                    "error": f"Computer Use run reached ANALYZE_MAX_PER_RUN={cfg.analyze_max_per_run}",
+                    "run_id": candidate.run_id,
+                }
+            # Save before the first paid model call, so a restart cannot reset
+            # the cap after spending has started.
+            state_store.save(state)
         if observed_metrics is None:
             await browser.enrich(candidate, {})
             # The legacy direct/manual route preserves its prior behavior. The
