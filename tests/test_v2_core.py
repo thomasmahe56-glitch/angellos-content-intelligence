@@ -263,7 +263,7 @@ def test_adaptation_and_quality_prompts_protect_against_unverified_ctas():
 
     luna = Luna()
     candidate = Candidate(source_url="https://www.instagram.com/reel/abc/", shortcode="abc")
-    asyncio.run(adapt_to_angellos(luna, candidate, {}, "canonical product facts", [], {}, "English"))
+    asyncio.run(adapt_to_angellos(luna, candidate, {}, "canonical product facts", [], {}, "English", "faceless"))
     asyncio.run(quality_check(luna, {}, "canonical product facts", []))
 
     adaptation_prompt = luna.prompts[0][1]
@@ -271,4 +271,6 @@ def test_adaptation_and_quality_prompts_protect_against_unverified_ctas():
     assert "Do not invent a lead magnet" in adaptation_prompt
     assert "65 English words or fewer" in adaptation_prompt
     assert "Follow @angellos.ai for practical qualification systems." in adaptation_prompt
+    assert "Production presentation is FACELESS" in adaptation_prompt
+    assert "talking head" in adaptation_prompt
     assert "does not require a promised reply" in quality_system

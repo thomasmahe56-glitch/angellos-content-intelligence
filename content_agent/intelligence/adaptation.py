@@ -15,7 +15,14 @@ _QUALITY_SCHEMA = {"type": "object", "additionalProperties": False, "properties"
 _SAFE_CTA = "Follow @angellos.ai for practical qualification systems."
 
 
-async def adapt_to_angellos(client: LunaClient, candidate: Candidate, gemini: dict, context: str, recent_content: list[dict], historical_signals: dict, language: str) -> dict:
+async def adapt_to_angellos(client: LunaClient, candidate: Candidate, gemini: dict, context: str, recent_content: list[dict], historical_signals: dict, language: str, presentation_style: str = "faceless") -> dict:
+    faceless_constraint = "" if presentation_style == "on_camera" else """
+Production presentation is FACELESS: do not ask Thomas/the founder to show
+their face, speak to camera, film a selfie, or appear as a talking head. Build
+the shot list from text overlays, abstract or contextual B-roll, hands-only
+shots, voice-over, and real screen recordings only when that exact screen is
+known to exist. The filming.camera field must describe a faceless setup.
+"""
     prompt = f"""Create an original, production-ready Angellos Reel brief in {language}.
 Source metadata: {candidate.to_dict()}
 Gemini observations: {gemini}
@@ -36,6 +43,7 @@ UI/screen recording unless that exact screen is confirmed in Canonical context.
 Use this exact low-risk CTA in both `script.cta` and `cta` unless Canonical
 context explicitly proves a more specific CTA and its fulfilment path:
 {_SAFE_CTA}
+{faceless_constraint}
 """
     adaptation = await client.json("You are Luna. Create only factually grounded original marketing concepts that a founder can film today.", prompt, _ADAPTATION_SCHEMA)
     # Source evidence is deterministic input, not model-generated marketing copy.
@@ -47,6 +55,7 @@ async def quality_check(client: LunaClient, adaptation: dict, context: str, rece
     return await client.json(
         "You are Luna's final quality gate. Approve only if original, factually safe, non-repetitive, clear, filmable and CTA-coherent. "
         "The exact generic CTA 'Follow @angellos.ai for practical qualification systems.' is coherent and does not require a promised reply, lead magnet, or beta fulfilment. "
+        "When the requested presentation is faceless, approve only a brief whose filming and shot list do not require the founder on camera. "
         "Do not reject an adaptation merely because it avoids unverified product details; approve it when it is useful and filmable without them.",
         f"Adaptation: {adaptation}\nContext: {context}\nRecent: {recent_content[:20]}",
         _QUALITY_SCHEMA,

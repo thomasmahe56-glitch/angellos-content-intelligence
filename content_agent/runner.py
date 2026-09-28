@@ -183,11 +183,11 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
             _record_gemini_usage(report, gemini)
             event(logger, "GEMINI analyzed", shortcode=candidate.shortcode)
             StateStore.mark(state, candidate, "analyzed", gemini_analysis_available=True, gemini_model=gemini.get("_gemini_model_used", ""))
-            adaptation = await adapt_to_angellos(luna, candidate, gemini, context, recent, historical, cfg.content_language)
+            adaptation = await adapt_to_angellos(luna, candidate, gemini, context, recent, historical, cfg.content_language, cfg.content_presentation_style)
             quality = await quality_check(luna, adaptation, context, recent)
             if not quality["approved"]:
                 # One bounded correction; no unbounded self-revision loop.
-                adaptation = await adapt_to_angellos(luna, candidate, gemini, context + "\nCorrect these quality issues: " + "; ".join(quality["issues"]), recent, historical, cfg.content_language)
+                adaptation = await adapt_to_angellos(luna, candidate, gemini, context + "\nCorrect these quality issues: " + "; ".join(quality["issues"]), recent, historical, cfg.content_language, cfg.content_presentation_style)
                 quality = await quality_check(luna, adaptation, context, recent)
             if not quality["approved"]:
                 StateStore.mark(state, candidate, "rejected_quality", quality=quality)
@@ -274,7 +274,7 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
         report.videos_analyzed = 1
         _record_gemini_usage(report, gemini)
         luna = LunaClient(cfg)
-        adaptation = await adapt_to_angellos(luna, candidate, gemini, context, recent, historical, cfg.content_language)
+        adaptation = await adapt_to_angellos(luna, candidate, gemini, context, recent, historical, cfg.content_language, cfg.content_presentation_style)
         gate = await quality_check(luna, adaptation, context, recent)
         if not gate["approved"]:
             # A supplied Reel receives the same single corrective pass as the
@@ -289,6 +289,7 @@ async def analyze_reel_url(source_url: str, *, dry_run: bool = False, cfg: Setti
                 recent,
                 historical,
                 cfg.content_language,
+                cfg.content_presentation_style,
             )
             gate = await quality_check(luna, adaptation, context, recent)
         report.ai_calls["luna"] = luna.calls

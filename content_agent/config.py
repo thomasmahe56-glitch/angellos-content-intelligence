@@ -62,6 +62,9 @@ class Settings:
     scout_scroll_limit: int = _int("SCOUT_SCROLL_LIMIT", 30)
     scout_max_runtime_minutes: int = _int("SCOUT_MAX_RUNTIME_MINUTES", 20)
     content_language: str = os.getenv("CONTENT_LANGUAGE", "EN")
+    # "faceless" keeps production usable without the founder appearing on
+    # camera; an explicit "on_camera" remains available for a future choice.
+    content_presentation_style: str = os.getenv("CONTENT_PRESENTATION_STYLE", "faceless").strip().lower()
     timezone: str = os.getenv("TIMEZONE", "Europe/Paris")
     content_publish_days: tuple[str, ...] = tuple(x.strip().upper() for x in os.getenv("CONTENT_PUBLISH_DAYS", "").split(",") if x.strip())
     content_items_per_day: int = _int("CONTENT_ITEMS_PER_DAY", 0)
