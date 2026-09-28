@@ -73,3 +73,37 @@ def test_scout_orchestrates_one_content_idea_and_cleans_video(monkeypatch, tmp_p
     assert not video.exists()
     state = json.loads((tmp_path / "state.json").read_text())
     assert state["reels"]["abc"]["status"] == "scheduled"
+
+
+def test_max_content_zero_never_downloads_or_creates(monkeypatch, tmp_path):
+    class Browser:
+        async def check_authentication(self): pass
+        async def discover(self, _):
+            return [Candidate(source_url="https://www.instagram.com/reel/abc/", shortcode="abc")]
+        async def enrich(self, candidate, _):
+            candidate.views, candidate.followers, candidate.media_is_video = 100_000, 10_000, True
+            return candidate
+
+    class Calendar:
+        def __init__(self, *_): pass
+        def recent_content(self): return []
+        def create(self, *_): raise AssertionError("max-content=0 must not create Notion content")
+
+    class Luna:
+        def __init__(self, *_): self.calls = 0
+
+    async def qualify(client, *_):
+        client.calls += 1
+        return {"decision": "keep", "confidence": 1, "reason": "fit", "likely_transferable_pattern": "contrast", "potential_angellos_angle": "DMs", "expected_content_category": "Tips"}
+
+    monkeypatch.setattr(runner, "InstagramBrowser", lambda _: Browser())
+    monkeypatch.setattr(runner, "NotionEditorialCalendar", Calendar)
+    monkeypatch.setattr(runner, "LunaClient", Luna)
+    monkeypatch.setattr(runner, "qualify_candidate", qualify)
+    monkeypatch.setattr(runner, "fetch_angellos_context", lambda: "context")
+    monkeypatch.setenv("CONTENT_AGENT_LOCAL_STATE_PATH", str(tmp_path / "state.json"))
+
+    result = asyncio.run(runner.run_daily_scout(max_content=0, cfg=Settings()))
+    assert result["relevance_qualified"] == 1
+    assert result["videos_downloaded"] == 0
+    assert result["content_ideas_created"] == 0

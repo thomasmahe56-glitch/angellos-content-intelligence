@@ -10,6 +10,7 @@ from content_agent.runner import analyze_reel_url
 from content_agent.discovery.instagram_browser import InstagramBrowser
 from content_agent.config import is_configured
 from content_agent.discovery.apify_metrics import _number, _shortcode
+from content_agent.runner import _qualified_rank
 
 
 def test_metric_normalization():
@@ -130,3 +131,11 @@ def test_apify_metric_helpers_only_accept_explicit_numeric_values():
     assert _shortcode("abc-12") == "abc-12"
     assert _number({"videoViewCount": 1200}, "videoViewCount") == 1200
     assert _number({"videoViewCount": "1200"}, "videoViewCount") is None
+
+
+def test_qualified_rank_prefers_virality_then_transferability_then_freshness():
+    older = Candidate(source_url="https://www.instagram.com/reel/old/", viral_ratio=5, discovered_at="2026-01-01T00:00:00+00:00")
+    stronger_fit = Candidate(source_url="https://www.instagram.com/reel/fit/", viral_ratio=5, discovered_at="2026-01-02T00:00:00+00:00")
+    more_viral = Candidate(source_url="https://www.instagram.com/reel/viral/", viral_ratio=6)
+    assert _qualified_rank((more_viral, {"confidence": 0})) > _qualified_rank((stronger_fit, {"confidence": 1}))
+    assert _qualified_rank((stronger_fit, {"confidence": 1})) > _qualified_rank((older, {"confidence": 0.5}))

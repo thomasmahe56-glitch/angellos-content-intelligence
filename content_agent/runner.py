@@ -47,7 +47,8 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
         return report.finish()
     historical = _historical_signals()
     try:
-        candidates = await browser.discover(min(max_reels or cfg.discovery_max_reels_per_run, cfg.discovery_max_reels_per_run))
+        requested_reels = cfg.discovery_max_reels_per_run if max_reels is None else max(0, max_reels)
+        candidates = await browser.discover(min(requested_reels, cfg.discovery_max_reels_per_run))
     except InstagramHumanActionRequired as exc:
         report.human_action_required, report.human_action_reason, report.status = True, str(exc), "human_action_required"
         return report.finish()
@@ -124,7 +125,12 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
         except Exception as exc:
             StateStore.mark(state, candidate, "intelligence_failed", error=str(exc))
             report.failed += 1
-    for candidate, relevance in qualified[:max_content or cfg.analyze_max_per_run]:
+    # Relevance confidence is an explicit transferability signal. Freshness
+    # falls back to discovery time when Instagram does not expose publication
+    # time, so ties stay deterministic and newer candidates are preferred.
+    qualified.sort(key=_qualified_rank, reverse=True)
+    requested_content = cfg.analyze_max_per_run if max_content is None else max(0, max_content)
+    for candidate, relevance in qualified[:min(requested_content, cfg.analyze_max_per_run)]:
         if time.monotonic() >= deadline:
             report.status = "partial_failure"
             report.errors.append("run_timeout_reached")
@@ -259,6 +265,15 @@ def _historical_signals() -> dict:
         return {"successful_hook_patterns": patterns.get("hooks_gagnants", []), "successful_formats": patterns.get("formats_gagnants", []), "successful_topics": patterns.get("sujets_performants", []), "weak_patterns": patterns.get("patterns_faibles", []), "notes": data.get("insights", [])}
     except Exception:
         return {"successful_hook_patterns": [], "successful_formats": [], "successful_topics": [], "weak_patterns": [], "notes": []}
+
+
+def _qualified_rank(item):
+    candidate, relevance = item
+    return (
+        candidate.viral_ratio or 0,
+        relevance.get("confidence", 0),
+        candidate.source_published_at or candidate.discovered_at,
+    )
 
 
 async def sync_performance() -> dict:
