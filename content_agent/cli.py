@@ -19,6 +19,7 @@ def main() -> None:
     scout.add_argument("--hermes", action="store_true", help="emit the compact Hermes event contract")
     scout.add_argument("--max-reels", type=int)
     scout.add_argument("--max-content", type=int)
+    scout.add_argument("--retry-insufficient-metrics", action="store_true", help="retry only candidates previously missing verifiable metrics")
     analyze = sub.add_parser("analyze")
     analyze.add_argument("instagram_reel_url")
     analyze.add_argument("--dry-run", action="store_true")
@@ -46,7 +47,7 @@ def main() -> None:
             result = asyncio.run(analyze_reel_url(args.instagram_reel_url, dry_run=args.dry_run))
         else:
             from content_agent.runner import run_daily_scout
-            result = asyncio.run(run_daily_scout(dry_run=args.dry_run, max_reels=args.max_reels, max_content=args.max_content))
+            result = asyncio.run(run_daily_scout(dry_run=args.dry_run, max_reels=args.max_reels, max_content=args.max_content, retry_insufficient_metrics=args.retry_insufficient_metrics))
     if args.command == "scout" and args.hermes:
         from content_agent.integrations.hermes import event_from_report
         result = event_from_report(result)

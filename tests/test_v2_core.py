@@ -34,6 +34,13 @@ def test_dedupe_by_shortcode():
     assert is_duplicate(candidate, {"reels": {"abc": {"status": "scheduled"}}})
 
 
+def test_insufficient_metrics_can_be_explicitly_retried_without_weakening_normal_dedupe():
+    candidate = Candidate(source_url="https://www.instagram.com/reel/abc/", shortcode="abc")
+    state = {"reels": {"abc": {"status": "insufficient_metrics"}}}
+    assert is_duplicate(candidate, state)
+    assert not is_duplicate(candidate, state, retry_insufficient_metrics=True)
+
+
 def test_state_transitions():
     candidate = Candidate(source_url="https://www.instagram.com/reel/abc/", shortcode="abc")
     state = {"reels": {}}

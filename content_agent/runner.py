@@ -21,7 +21,7 @@ from config import ANGELLOS_NICHE_CONTEXT
 from phase2_analysis.notion_context import fetch_angellos_context
 
 
-async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = None, max_content: Optional[int] = None, cfg: Settings = settings) -> dict:
+async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = None, max_content: Optional[int] = None, retry_insufficient_metrics: bool = False, cfg: Settings = settings) -> dict:
     """Run the complete V2 pipeline. Each candidate is isolated by design."""
     report = RunReport()
     apify_cost_usd = 0.0
@@ -83,7 +83,7 @@ async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = N
             report.status = "partial_failure"
             report.errors.append("run_timeout_reached")
             break
-        if is_duplicate(candidate, state):
+        if is_duplicate(candidate, state, retry_insufficient_metrics=retry_insufficient_metrics):
             report.duplicates += 1
             continue
         try:

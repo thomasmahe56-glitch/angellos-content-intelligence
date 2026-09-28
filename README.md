@@ -89,6 +89,7 @@ python -m content_agent scout --once --dry-run --max-reels 10 --max-content 1
 python -m content_agent analyze https://www.instagram.com/reel/SHORTCODE/ --dry-run
 python -m content_agent scout --once --json
 python -m content_agent scout --once --hermes
+python -m content_agent scout --once --retry-insufficient-metrics
 python -m content_agent sync-performance
 ```
 

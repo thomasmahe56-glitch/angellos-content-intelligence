@@ -3,9 +3,11 @@ from __future__ import annotations
 from content_agent.models.schemas import Candidate
 
 
-def is_duplicate(candidate: Candidate, state: dict) -> bool:
+def is_duplicate(candidate: Candidate, state: dict, *, retry_insufficient_metrics: bool = False) -> bool:
     records = state.get("reels", {})
-    if candidate.key in records:
-        return True
+    record = records.get(candidate.key)
+    if record:
+        return not (retry_insufficient_metrics and record.get("status") == "insufficient_metrics")
     url = candidate.source_url.rstrip("/")
-    return any((r.get("source_url") or "").rstrip("/") == url for r in records.values())
+    matching = next((r for r in records.values() if (r.get("source_url") or "").rstrip("/") == url), None)
+    return bool(matching and not (retry_insufficient_metrics and matching.get("status") == "insufficient_metrics"))
