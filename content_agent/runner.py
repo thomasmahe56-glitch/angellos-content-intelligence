@@ -22,6 +22,12 @@ from config import ANGELLOS_NICHE_CONTEXT
 from phase2_analysis.notion_context import fetch_angellos_context
 
 
+# The durable Notion run ledger is preferred.  This bounded process-local
+# fallback keeps a malformed legacy ledger from stopping a live run; the
+# current-run page count is still read from the canonical Notion database.
+_PROCESS_RUN_RESERVATIONS: dict[str, set[str]] = {}
+
+
 async def run_daily_scout(*, dry_run: bool = False, max_reels: Optional[int] = None, max_content: Optional[int] = None, retry_insufficient_metrics: bool = False, cfg: Settings = settings) -> dict:
     """Run the complete V2 pipeline. Each candidate is isolated by design."""
     report = RunReport()
@@ -367,18 +373,36 @@ async def analyze_reel_url(
             return report.finish()
         if observed_metrics is not None:
             state_store = StateStore(cfg)
-            if not state_store.durable and not (dry_run or cfg.allow_ephemeral_state):
-                return {"status": "configuration_error", "error": "NOTION_CONTENT_AGENT_STATE_PAGE_ID is required for durable Computer Use cost caps"}
-            state = state_store.load(strict=state_store.durable and not cfg.allow_ephemeral_state)
-            if not StateStore.reserve_run_analysis(state, candidate.run_id, candidate.key, cfg.analyze_max_per_run):
+            reserved = False
+            try:
+                if state_store.durable:
+                    state = state_store.load(strict=True)
+                    reserved = StateStore.reserve_run_analysis(state, candidate.run_id, candidate.key, cfg.analyze_max_per_run)
+                    if reserved:
+                        state_store.save(state)
+                elif dry_run or cfg.allow_ephemeral_state:
+                    state = state_store.load(strict=False)
+                    reserved = StateStore.reserve_run_analysis(state, candidate.run_id, candidate.key, cfg.analyze_max_per_run)
+                    if reserved:
+                        state_store.save(state)
+                else:
+                    return {"status": "configuration_error", "error": "NOTION_CONTENT_AGENT_STATE_PAGE_ID is required for durable Computer Use cost caps"}
+            except Exception as exc:
+                # Do not erase or overwrite an existing state page to repair a
+                # legacy ledger in the middle of a paid run.  Count the current
+                # run's committed pages and reserve the remainder in memory.
+                event(get_logger(cfg.log_format == "json"), "Run ledger fallback", run_id=candidate.run_id, error=str(exc))
+                current = _PROCESS_RUN_RESERVATIONS.setdefault(candidate.run_id, set())
+                committed = calendar.count_run_items(candidate.run_id)
+                reserved = candidate.key in current or committed + len(current) < cfg.analyze_max_per_run
+                if reserved:
+                    current.add(candidate.key)
+            if not reserved:
                 return {
                     "status": "budget_exhausted",
                     "error": f"Computer Use run reached ANALYZE_MAX_PER_RUN={cfg.analyze_max_per_run}",
                     "run_id": candidate.run_id,
                 }
-            # Save before the first paid model call, so a restart cannot reset
-            # the cap after spending has started.
-            state_store.save(state)
         if observed_metrics is None:
             await browser.enrich(candidate, {})
             # The legacy direct/manual route preserves its prior behavior. The

@@ -174,6 +174,17 @@ class NotionEditorialCalendar:
         matches = response.get("results", [])
         return matches[0].get("url") if matches else None
 
+    def count_run_items(self, run_id: str) -> int:
+        """Count current-run pages without reading the historical state ledger."""
+        self._require()
+        self.ensure_v2_properties()
+        response = self.client.databases.query(
+            database_id=self.settings.notion_programme_content_db,
+            filter={"property": "Content Intelligence Run ID", "rich_text": {"equals": run_id}},
+            page_size=100,
+        )
+        return len(response.get("results", []))
+
     def create(self, candidate: Candidate, gemini: dict, adaptation: dict, dry_run: bool = False) -> Optional[str]:
         self._require()
         if dry_run:
